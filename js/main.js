@@ -73,7 +73,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 });
-fetch("https://abb-backend.onrender.com/api/withdraw", { ... })
-fetch("https://abb-backend.onrender.com/api/recharge", { ... })
-fetch("https://abb-backend.onrender.com/api/vip-approve", { ... })
+fetch("https://abb-backend.onrender.com/api/withdraw", { ...approve-withdraw})
+fetch("https://abb-backend.onrender.com/api/recharge", { ...approve-recharge})
+fetch("https://abb-backend.onrender.com/api/vip-approve", { ...approve-vip})
 
