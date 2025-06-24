@@ -797,4 +797,6 @@ document.querySelectorAll('.admin-sidebar a').forEach(link => {
     document.getElementById(`${sectionId}-section`).classList.remove('hidden');
   });
 });
-fetch("https://abb-backend.onrender.com/api/admin", { ... })
+fetch("https://abb-backend.onrender.com/api/withdraw", { ... })
+fetch("https://abb-backend.onrender.com/api/recharge", { ... })
+fetch("https://abb-backend.onrender.com/api/vip-approve", { ... })
