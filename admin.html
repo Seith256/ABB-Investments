@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ABB - Admin</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/admin.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <main class="admin-main">
+    <header>
+        <div class="logo">ABB Admin</div>
+        <nav class="main-nav">
+            <ul>
+                <li><a href="#" id="admin-logout-btn">Logout</a></li>
+            </ul>
+        </nav>
+    </header>
+
+   
+        <div class="admin-sidebar">
+            <ul>
+                <li class="active"><a href="#" data-section="dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</a></li>
+                <li><a href="#" data-section="recharges"><i class="fas fa-money-bill-wave"></i> Recharge Requests</a></li>
+                <li><a href="#" data-section="withdrawals"><i class="fas fa-hand-holding-usd"></i> Withdrawal Requests</a></li>
+                <li><a href="#" data-section="users"><i class="fas fa-users"></i> User Management</a></li>
+                <li><a href="#" data-section="vip"><i class="fas fa-crown"></i> VIP Approvals</a></li>
+                <li><a href="#" data-section="reports"><i class="fas fa-chart-bar"></i> Reports</a></li>
+            </ul>
+        </div>
+
+        <div class="admin-content">
+            <!-- Dashboard Section -->
+            <section id="dashboard-section" class="admin-section">
+                <h2>Admin Dashboard</h2>
+                <div class="admin-stats">
+                    <div class="admin-stat-card">
+                        <h4>Total Users</h4>
+                        <div class="stat-value" id="total-users">0</div>
+                    </div>
+                    <div class="admin-stat-card">
+                        <h4>Pending Recharges</h4>
+                        <div class="stat-value" id="pending-recharges">0</div>
+                    </div>
+                    <div class="admin-stat-card">
+                        <h4>Pending Withdrawals</h4>
+                        <div class="stat-value" id="pending-withdrawals">0</div>
+                    </div>
+                    <div class="admin-stat-card">
+                        <h4>Total Balance</h4>
+                        <div class="stat-value" id="total-balance">UGX 0</div>
+                    </div>
+                </div>
+
+                <div class="recent-activity">
+                    <h3>Recent Activity</h3>
+                    <div class="activity-list" id="recent-activity">
+                        <!-- Will be populated by JavaScript -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Recharge Requests Section -->
+            <section id="recharges-section" class="admin-section hidden">
+                <h2>Recharge Requests</h2>
+                <div class="admin-table-container">
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>Amount</th>
+                                <th>Date</th>
+                                <th>Proof</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recharge-requests">
+                            <!-- Will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Withdrawal Requests Section -->
+            <section id="withdrawals-section" class="admin-section hidden">
+                <h2>Withdrawal Requests</h2>
+                <div class="admin-table-container">
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>Amount</th>
+                                <th>Phone</th>
+                                <th>Network</th>
+                                <th>Date</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="withdrawal-requests">
+                            <!-- Will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- User Management Section -->
+            <section id="users-section" class="admin-section hidden">
+                <h2>User Management</h2>
+                <div class="admin-search">
+                    <input type="text" id="user-search" placeholder="Search users...">
+                    <button id="search-users-btn">Search</button>
+                </div>
+                <div class="admin-table-container">
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Phone</th>
+                                <th>Balance</th>
+                                <th>VIP Level</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-list">
+                            <!-- Will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- VIP Approvals Section -->
+            <section id="vip-section" class="admin-section hidden">
+                <h2>VIP Upgrade Requests</h2>
+                <div class="admin-table-container">
+                    <table class="admin-table">
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>VIP Level</th>
+                                <th>Amount Paid</th>
+                                <th>Date</th>
+                                <th>Expected Daily</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="vip-requests">
+                            <!-- Will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Reports Section -->
+            <section id="reports-section" class="admin-section hidden">
+                <h2>Reports</h2>
+                <div class="report-filters">
+                    <div class="filter-group">
+                        <label for="report-type">Report Type:</label>
+                        <select id="report-type">
+                            <option value="transactions">Transactions</option>
+                            <option value="users">User Growth</option>
+                            <option value="profits">Profit Distribution</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="date-from">From:</label>
+                        <input type="date" id="date-from">
+                    </div>
+                    <div class="filter-group">
+                        <label for="date-to">To:</label>
+                        <input type="date" id="date-to">
+                    </div>
+                    <button id="generate-report-btn">Generate Report</button>
+                </div>
+                <div class="report-results" id="report-results">
+                    <!-- Report will be displayed here -->
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- User Detail Modal -->
+    <div class="modal" id="user-detail-modal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h3 id="modal-user-title">User Details</h3>
+            <div class="user-details" id="user-details-content">
+                <!-- Will be populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add this before </body> in admin.html -->
+<!-- Confirmation Modal -->
+<div class="modal" id="confirmation-modal">
+    <div class="modal-content">
+        <span class="close-modal">&times;</span>
+        <h3 id="confirmation-title">Confirm Action</h3>
+        <p id="confirmation-message">Are you sure you want to perform this action?</p>
+        <div class="modal-actions">
+            <button id="confirm-action-btn" class="action-btn approve-btn">Confirm</button>
+            <button id="cancel-action-btn" class="action-btn reject-btn">Cancel</button>
+        </div>
+    </div>
+</div>
+
+    <script src="js/auth.js"></script>
+    <script src="js/admin.js"></script>
+</body>
+</html>
+

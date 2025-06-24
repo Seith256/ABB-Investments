@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AAB - Products</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <header>
+        <div class="logo"><img src="./images/logo.jpg"></div>
+        <nav class="main-nav">
+            <ul>
+                <li><a href="#" id="logout-btn">Logout</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <section class="products-section">
+            <h2>VIP Investment Packages</h2>
+            <p class="products-description">Choose a VIP package to start earning daily profits. Higher packages offer higher daily returns.</p>
+            
+            <div class="products-grid" id="vip-products">
+                <!-- VIP products will be loaded here by JavaScript -->
+            </div>
+        </section>
+
+        <section class="vip-modal modal-hidden" id="vip-modal">
+            <div class="modal-content">
+                <span class="close-modal">&times;</span>
+                <h3 id="vip-modal-title">Upgrade to VIP</h3>
+                <div class="vip-details" id="vip-details">
+                    <!-- Will be populated by JavaScript -->
+                </div>
+                <button id="confirm-vip-btn" class="modal-action-btn">Confirm Purchase</button>
+            </div>
+        </section>
+    </main>
+
+    <footer class="fixed-nav">
+        <a href="index.html" class="nav-btn">
+            <i class="fas fa-home"></i>HOME
+            <span>Home</span>
+        </a>
+        <a href="products.html" class="nav-btn active">
+            <i class="fas fa-shopping-bag"></i>VIP
+            <span>Products</span>
+        </a>
+        <a href="about.html" class="nav-btn">
+            <i class="fas fa-info-circle"></i>ABOUT US
+            <span>About</span>
+        </a>
+        <a href="profile.html" class="nav-btn">
+            <i class="fas fa-user"></i>PROFILE
+            <span>Profile</span>
+        </a>
+    </footer>
+
+    <script src="js/auth.js"></script>
+    <script src="js/user.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
