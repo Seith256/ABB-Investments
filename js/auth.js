@@ -1,4 +1,16 @@
-// Current user session
+// Database simulation (unchanged)
+const usersDB = JSON.parse(localStorage.getItem('aab_users')) || [];
+const adminDB = JSON.parse(localStorage.getItem('aab_admin')) || [
+    { email: 'admin@aab.com', password: 'admin123', name: 'Admin' }
+];
+const DEFAULT_INVITE_CODE = '2233';
+
+// Initialize default admin (unchanged)
+if (!localStorage.getItem('aab_admin')) {
+    localStorage.setItem('aab_admin', JSON.stringify(adminDB));
+}
+
+// Current user session (unchanged)
 let currentUser = JSON.parse(sessionStorage.getItem('aab_currentUser'));
 let currentAdmin = JSON.parse(sessionStorage.getItem('aab_currentAdmin'));
 
@@ -7,91 +19,112 @@ document.addEventListener('DOMContentLoaded', function() {
     // ... (keep existing redirect logic)
 });
 
-// Login Form - Fixed Version
+// Enhanced Login Form
 if (document.getElementById('login-form')) {
     document.getElementById('login-form').addEventListener('submit', async function(e) {
         e.preventDefault();
         
         const email = document.getElementById('login-email').value;
         const password = document.getElementById('login-password').value;
+        const inviteCode = document.getElementById('login-invite').value || DEFAULT_INVITE_CODE;
         const isAdmin = document.getElementById('login-admin').checked;
-
-        console.log('Login attempt:', {email, password, isAdmin}); // Debug log
         
         try {
             if (isAdmin) {
-                // Admin login (local fallback)
-                if (email === 'admin@aab.com' && password === 'admin123') {
-                    sessionStorage.setItem('aab_currentAdmin', JSON.stringify({
-                        email: 'admin@aab.com',
-                        name: 'Admin'
-                    }));
+                // Admin login (unchanged local version)
+                const admin = adminDB.find(a => a.email === email && a.password === password);
+                if (admin) {
+                    sessionStorage.setItem('aab_currentAdmin', JSON.stringify(admin));
                     window.location.href = 'admin.html';
                     return;
                 }
                 throw new Error('Invalid admin credentials');
             }
 
-            // User login
-            const response = await fetch("https://abb-backend.onrender.com/api/login", {
+            // User login - verify with backend but use local data
+            const authResponse = await fetch("https://abb-backend.onrender.com/api/login", {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ email, password }),
             });
 
-            console.log('Login response:', response); // Debug log
-            
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || 'Login failed');
+            if (!authResponse.ok) {
+                throw new Error('Invalid email or password');
             }
 
-            const data = await response.json();
-            console.log('Login data:', data); // Debug log
-
-            if (!data.user) {
-                throw new Error('User data missing in response');
+            // Find or create local user record
+            let user = usersDB.find(u => u.email === email);
+            if (!user) {
+                // Create new user with all original fields
+                user = {
+                    id: Date.now().toString(),
+                    name: email.split('@')[0], // Default name
+                    email,
+                    phone: '',
+                    password, // Note: Only stored locally
+                    balance: 2000, // Welcome bonus
+                    invitationCode: Math.floor(1000 + Math.random() * 9000).toString(),
+                    invitedBy: null,
+                    hasUsedInvite: false,
+                    vipLevel: 0,
+                    dailyProfit: 0,
+                    totalEarnings: 0,
+                    referralEarnings: 0,
+                    referrals: [],
+                    transactions: [{
+                        type: 'bonus',
+                        amount: 2000,
+                        date: new Date().toISOString(),
+                        status: 'completed'
+                    }],
+                    rechargeRequests: [],
+                    withdrawalRequests: [],
+                    vipRequests: [],
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                };
+                usersDB.push(user);
+                localStorage.setItem('aab_users', JSON.stringify(usersDB));
             }
 
-            // Map backend response to frontend expected format
-            const userData = {
-                id: data.user._id || Date.now().toString(),
-                name: data.user.username || 'New User',
-                email: data.user.email,
-                phone: data.user.phone || '',
-                balance: data.user.balance || 0,
-                isVIP: data.user.isVIP || false,
-                vipLevel: data.user.isVIP ? 1 : 0,
-                dailyProfit: 0,
-                transactions: [],
-                invitationCode: data.user.invitationCode || Math.random().toString(36).substr(2, 8),
-                referrals: []
-            };
+            // Process invitation code (original logic)
+            if (inviteCode && inviteCode !== DEFAULT_INVITE_CODE && !user.hasUsedInvite) {
+                const inviter = usersDB.find(u => u.invitationCode === inviteCode);
+                if (inviter) {
+                    inviter.balance += 2000;
+                    inviter.referralEarnings += 2000;
+                    inviter.referrals.push({
+                        email: user.email,
+                        date: new Date().toISOString(),
+                        bonus: 2000
+                    });
+                    user.invitedBy = inviter.email;
+                    user.hasUsedInvite = true;
+                    localStorage.setItem('aab_users', JSON.stringify(usersDB));
+                }
+            }
 
-            sessionStorage.setItem('aab_currentUser', JSON.stringify(userData));
+            sessionStorage.setItem('aab_currentUser', JSON.stringify(user));
             window.location.href = 'index.html';
 
         } catch (error) {
             console.error('Login error:', error);
-            alert(error.message || 'Login failed. Please try again.');
+            alert(error.message || 'Login failed');
         }
     });
 }
 
-// Signup Form - Fixed Version
+// Enhanced Signup Form
 if (document.getElementById('signup-form')) {
     document.getElementById('signup-form').addEventListener('submit', async function(e) {
         e.preventDefault();
         
-        const username = document.getElementById('signup-name').value;
+        const name = document.getElementById('signup-name').value;
         const email = document.getElementById('signup-email').value;
         const phone = document.getElementById('signup-phone').value;
         const password = document.getElementById('signup-password').value;
         const confirmPassword = document.getElementById('signup-confirm').value;
-
-        console.log('Signup attempt:', {username, email, phone}); // Debug log
+        const inviteCode = document.getElementById('signup-invite').value || DEFAULT_INVITE_CODE;
         
         if (password !== confirmPassword) {
             alert('Passwords do not match');
@@ -99,61 +132,74 @@ if (document.getElementById('signup-form')) {
         }
 
         try {
-            const response = await fetch("https://abb-backend.onrender.com/api/signup", {
+            // Register with backend
+            const authResponse = await fetch("https://abb-backend.onrender.com/api/signup", {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ 
-                    username, 
-                    email, 
-                    password,
-                    phone 
-                }),
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username: name, email, password, phone }),
             });
 
-            console.log('Signup response:', response); // Debug log
-            
-            if (!response.ok) {
-                const errorData = await response.json();
+            if (!authResponse.ok) {
+                const errorData = await authResponse.json();
                 throw new Error(errorData.message || 'Registration failed');
             }
 
-            const data = await response.json();
-            console.log('Signup data:', data); // Debug log
-
-            // Create complete user object for frontend
+            // Create complete local user record
             const newUser = {
-                id: data.user?._id || Date.now().toString(),
-                name: data.user?.username || username,
-                email: data.user?.email || email,
-                phone: data.user?.phone || phone,
-                balance: 2000, // Initial bonus
-                isVIP: false,
+                id: Date.now().toString(),
+                name,
+                email,
+                phone,
+                password, // Stored locally only
+                balance: 2000, // Welcome bonus
+                invitationCode: Math.floor(1000 + Math.random() * 9000).toString(),
+                invitedBy: null,
+                hasUsedInvite: false,
                 vipLevel: 0,
                 dailyProfit: 0,
+                totalEarnings: 0,
+                referralEarnings: 0,
+                referrals: [],
                 transactions: [{
                     type: 'bonus',
                     amount: 2000,
                     date: new Date().toISOString(),
                     status: 'completed'
                 }],
-                invitationCode: Math.random().toString(36).substr(2, 8).toUpperCase(),
-                referrals: []
+                rechargeRequests: [],
+                withdrawalRequests: [],
+                vipRequests: [],
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
             };
 
+            // Process invitation code
+            if (inviteCode && inviteCode !== DEFAULT_INVITE_CODE) {
+                const inviter = usersDB.find(u => u.invitationCode === inviteCode);
+                if (inviter) {
+                    newUser.invitedBy = inviter.email;
+                    newUser.hasUsedInvite = true;
+                    inviter.referrals.push({
+                        email: newUser.email,
+                        date: new Date().toISOString(),
+                        bonus: 0
+                    });
+                }
+            }
+
+            usersDB.push(newUser);
+            localStorage.setItem('aab_users', JSON.stringify(usersDB));
             sessionStorage.setItem('aab_currentUser', JSON.stringify(newUser));
-            alert('Registration successful!');
             window.location.href = 'index.html';
 
         } catch (error) {
             console.error('Signup error:', error);
-            alert(error.message || 'Registration failed. Please try again.');
+            alert(error.message || 'Registration failed');
         }
     });
 }
 
-// Logout functionality
+// Logout functionality (unchanged)
 function setupLogout() {
     const logoutButtons = document.querySelectorAll('#logout-btn, #admin-logout-btn');
     logoutButtons.forEach(btn => {
@@ -168,5 +214,5 @@ function setupLogout() {
     });
 }
 
-// Initialize logout buttons when DOM is loaded
+// Initialize (unchanged)
 document.addEventListener('DOMContentLoaded', setupLogout);
