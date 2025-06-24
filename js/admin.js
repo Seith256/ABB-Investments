@@ -797,3 +797,4 @@ document.querySelectorAll('.admin-sidebar a').forEach(link => {
     document.getElementById(`${sectionId}-section`).classList.remove('hidden');
   });
 });
+fetch("https://abb-backend.onrender.com/api/admin", { ... })
