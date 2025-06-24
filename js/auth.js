@@ -186,3 +186,12 @@ function setupLogout() {
 // Initialize logout buttons when DOM is loaded
 document.addEventListener('DOMContentLoaded', setupLogout);
 
+fetch("https://abb-backend.onrender.com/api/login", { ... })
+fetch("https://abb-backend.onrender.com/api/signup", { ... })
+fetch("https://abb-backend.onrender.com/api/withdraw", { ... })
+fetch("https://abb-backend.onrender.com/api/recharge", { ... })
+
+
+
+
+
