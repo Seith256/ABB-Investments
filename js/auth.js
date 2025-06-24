@@ -1,14 +1,3 @@
-// Simulated database for admin (kept as fallback)
-const adminDB = JSON.parse(localStorage.getItem('aab_admin')) || [
-    { email: 'admin@aab.com', password: 'admin123', name: 'Admin' }
-];
-const DEFAULT_INVITE_CODE = '2233';
-
-// Initialize default admin if not exists
-if (!localStorage.getItem('aab_admin')) {
-    localStorage.setItem('aab_admin', JSON.stringify(adminDB));
-}
-
 // Current user session
 let currentUser = JSON.parse(sessionStorage.getItem('aab_currentUser'));
 let currentAdmin = JSON.parse(sessionStorage.getItem('aab_currentAdmin'));
@@ -42,47 +31,40 @@ if (document.getElementById('login-form')) {
         
         const email = document.getElementById('login-email').value;
         const password = document.getElementById('login-password').value;
-        const inviteCode = document.getElementById('login-invite').value || DEFAULT_INVITE_CODE;
         const isAdmin = document.getElementById('login-admin').checked;
         
         try {
             if (isAdmin) {
-                // Admin login - keeping local version as fallback
-                const admin = adminDB.find(a => a.email === email && a.password === password);
-                if (admin) {
-                    sessionStorage.setItem('aab_currentAdmin', JSON.stringify(admin));
+                // Admin login (kept local as per your server doesn't have admin routes)
+                if (email === 'admin@aab.com' && password === 'admin123') {
+                    sessionStorage.setItem('aab_currentAdmin', JSON.stringify({
+                        email: 'admin@aab.com',
+                        name: 'Admin'
+                    }));
                     window.location.href = 'admin.html';
                 } else {
-                    // Try API login if local fails
-                    const response = await fetch("https://abb-backend.onrender.com/api/admin/login", {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json",
-                        },
-                        body: JSON.stringify({ email, password }),
-                    });
-                    
-                    const data = await response.json();
-                    if (response.ok) {
-                        sessionStorage.setItem('aab_currentAdmin', JSON.stringify(data));
-                        window.location.href = 'admin.html';
-                    } else {
-                        alert(data.message || 'Invalid admin credentials');
-                    }
+                    alert('Invalid admin credentials');
                 }
             } else {
-                // User login via API
-                const response = await fetch("https://abb-backend.onrender.com/api/users/login", {
+                // User login
+                const response = await fetch("https://abb-backend.onrender.com/api/login", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
                     },
-                    body: JSON.stringify({ email, password, inviteCode }),
+                    body: JSON.stringify({ email, password }),
                 });
                 
                 const data = await response.json();
                 if (response.ok) {
-                    sessionStorage.setItem('aab_currentUser', JSON.stringify(data));
+                    sessionStorage.setItem('aab_currentUser', JSON.stringify({
+                        id: data.user._id,
+                        name: data.user.username,
+                        email: data.user.email,
+                        balance: data.user.balance,
+                        isVIP: data.user.isVIP,
+                        transactions: []
+                    }));
                     window.location.href = 'index.html';
                 } else {
                     alert(data.message || 'Invalid email or password');
@@ -90,16 +72,7 @@ if (document.getElementById('login-form')) {
             }
         } catch (error) {
             console.error('Login error:', error);
-            alert('An error occurred during login. Trying local login...');
-            
-            // Fallback to local login if API fails
-            const user = JSON.parse(localStorage.getItem('aab_users'))?.find(u => u.email === email && u.password === password);
-            if (user) {
-                sessionStorage.setItem('aab_currentUser', JSON.stringify(user));
-                window.location.href = 'index.html';
-            } else {
-                alert('Invalid credentials');
-            }
+            alert('An error occurred during login');
         }
     });
 }
@@ -111,10 +84,8 @@ if (document.getElementById('signup-form')) {
         
         const name = document.getElementById('signup-name').value;
         const email = document.getElementById('signup-email').value;
-        const phone = document.getElementById('signup-phone').value;
         const password = document.getElementById('signup-password').value;
         const confirmPassword = document.getElementById('signup-confirm').value;
-        const inviteCode = document.getElementById('signup-invite').value || DEFAULT_INVITE_CODE;
         
         if (password !== confirmPassword) {
             alert('Passwords do not match');
@@ -122,101 +93,34 @@ if (document.getElementById('signup-form')) {
         }
         
         try {
-            // First try API registration
-            const response = await fetch("https://abb-backend.onrender.com/api/users/register", {
+            const response = await fetch("https://abb-backend.onrender.com/api/signup", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ name, email, phone, password, inviteCode }),
+                body: JSON.stringify({ 
+                    username: name, 
+                    email, 
+                    password 
+                }),
             });
             
-            const data = await response.json();
             if (response.ok) {
-                sessionStorage.setItem('aab_currentUser', JSON.stringify(data));
-                window.location.href = 'index.html';
+                const data = await response.json();
+                alert('Registration successful! Please login.');
+                window.location.href = 'login.html';
             } else {
-                // Fallback to local storage if API fails
-                if (JSON.parse(localStorage.getItem('aab_users'))?.some(u => u.email === email)) {
-                    alert('Email already registered');
-                    return;
-                }
-                
-                // Generate unique invitation code
-                let invitationCode;
-                do {
-                    invitationCode = Math.floor(1000 + Math.random() * 9000).toString();
-                } while (JSON.parse(localStorage.getItem('aab_users'))?.some(u => u.invitationCode === invitationCode));
-                
-                const newUser = {
-                    id: Date.now().toString(),
-                    name,
-                    email,
-                    phone,
-                    password,
-                    balance: 2000,
-                    invitationCode,
-                    invitedBy: null,
-                    hasUsedInvite: false,
-                    vipLevel: 0,
-                    dailyProfit: 0,
-                    totalEarnings: 0,
-                    referralEarnings: 0,
-                    referrals: [],
-                    transactions: [
-                        {
-                            type: 'bonus',
-                            amount: 2000,
-                            date: new Date().toISOString(),
-                            status: 'completed'
-                        }
-                    ],
-                    rechargeRequests: [],
-                    withdrawalRequests: [],
-                    vipRequests: [],
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString()
-                };
-                
-                // Process invitation if code is provided and not default
-                if (inviteCode && inviteCode !== DEFAULT_INVITE_CODE) {
-                    const inviter = JSON.parse(localStorage.getItem('aab_users'))?.find(u => u.invitationCode === inviteCode);
-                    if (inviter) {
-                        newUser.invitedBy = inviter.email;
-                        newUser.hasUsedInvite = true;
-                        inviter.referrals.push({
-                            email: newUser.email,
-                            date: new Date().toISOString(),
-                            bonus: 0
-                        });
-                    }
-                }
-                
-                const usersDB = JSON.parse(localStorage.getItem('aab_users')) || [];
-                usersDB.push(newUser);
-                localStorage.setItem('aab_users', JSON.stringify(usersDB));
-                
-                sessionStorage.setItem('aab_currentUser', JSON.stringify(newUser));
-                window.location.href = 'index.html';
+                const errorData = await response.json();
+                alert(errorData.message || 'Registration failed');
             }
         } catch (error) {
             console.error('Signup error:', error);
-            alert('An error occurred during registration. Trying local signup...');
-            
-            // Fallback to local signup
-            const usersDB = JSON.parse(localStorage.getItem('aab_users')) || [];
-            if (usersDB.some(u => u.email === email)) {
-                alert('Email already registered');
-                return;
-            }
-            
-            // ... rest of local signup logic (same as above) ...
-            // (Include the same local signup logic here as a complete fallback)
+            alert('An error occurred during registration');
         }
     });
 }
 
-// Logout functionality (unchanged)
+// Logout functionality
 function setupLogout() {
     const logoutButtons = document.querySelectorAll('#logout-btn, #admin-logout-btn');
     logoutButtons.forEach(btn => {
