@@ -428,3 +428,21 @@ document.addEventListener('DOMContentLoaded', () => {
     initAuth();
     setupLogout();
 });
+
+// In auth.js login/signup functions:
+try {
+  const response = await fetch(/* ... */);
+  
+  // Check if response is JSON
+  const contentType = response.headers.get('content-type');
+  if (!contentType || !contentType.includes('application/json')) {
+    const text = await response.text();
+    throw new Error(`Invalid response: ${text.slice(0, 100)}`);
+  }
+
+  const data = await response.json();
+  // ... rest of your code
+} catch (error) {
+  console.error('Request failed:', error);
+  alert(`Request failed: ${error.message}`);
+}
