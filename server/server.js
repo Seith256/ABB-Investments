@@ -103,8 +103,106 @@ const createAdmin = async () => {
 };
 
 // ======================
-// PROTECTED USER ROUTES
+// USER AUTH ROUTES (PUBLIC)
 // ======================
+app.post('/api/register', async (req, res) => {
+  try {
+    const { username, email, password, referralCode } = req.body;
+    
+    if (await User.findOne({ email })) {
+      return res.status(400).json({ success: false, message: 'Email already exists' });
+    }
+
+    const referral = referralCode ? await User.findOne({ referralCode }) : null;
+
+    const user = new User({
+      username,
+      email,
+      password: await bcrypt.hash(password, 10),
+      referralCode: Math.random().toString(36).substr(2, 8).toUpperCase(),
+      referredBy: referral?._id,
+      transactions: [{
+        type: 'referral',
+        amount: 2000,
+        status: 'approved',
+        details: { description: 'Signup bonus' }
+      }]
+    });
+
+    if (referral) {
+      referral.balance += 2000;
+      referral.referralEarnings += 2000;
+      referral.transactions.push({
+        type: 'referral',
+        amount: 2000,
+        status: 'approved',
+        details: { referredUser: user.email }
+      });
+      await referral.save();
+    }
+
+    await user.save();
+
+    const token = generateToken({ 
+      id: user._id, 
+      email: user.email, 
+      isAdmin: false 
+    });
+
+    res.status(201).json({ 
+      success: true,
+      message: 'Registration successful',
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        balance: user.balance,
+        isVIP: user.isVIP,
+        vipLevel: user.vipLevel
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Registration failed' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    // Optional: Add daily VIP profit calculation here
+
+    const token = generateToken({
+      id: user._id,
+      email: user.email,
+      isAdmin: false
+    });
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        balance: user.balance,
+        isVIP: user.isVIP,
+        vipLevel: user.vipLevel,
+        referralCode: user.referralCode
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Login failed' });
+  }
+});
+
 app.use(verifyToken);
 
 app.get('/api/user', async (req, res) => {
