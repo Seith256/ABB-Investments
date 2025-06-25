@@ -4,564 +4,582 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const moment = require('moment');
 
 const app = express();
 
-// Config
+// ======================
+// CONFIGURATION
+// ======================
 const { MONGO_URI, JWT_SECRET } = process.env;
-const ADMIN_EMAIL = "admin@aab.com";
-const ADMIN_PASS = "admin123";
-const VIP_LEVELS = [
-  { price: 10000, dailyProfit: 1800 },
-  { price: 30000, dailyProfit: 6000 },
-  { price: 50000, dailyProfit: 10000 },
-  { price: 80000, dailyProfit: 13000 },
-  { price: 120000, dailyProfit: 28000 },
-  { price: 240000, dailyProfit: 60000 },
-  { price: 300000, dailyProfit: 75000 },
-  { price: 600000, dailyProfit: 150000 },
-  { price: 1200000, dailyProfit: 400000 },
-  { price: 2000000, dailyProfit: 600000 }
+const VIP_CONFIG = [
+  { level: 1, price: 10000, daily: 1800, duration: 60 },
+  { level: 2, price: 30000, daily: 6000, duration: 60 },
+  { level: 3, price: 50000, daily: 10000, duration: 60 },
+  { level: 4, price: 80000, daily: 13000, duration: 60 },
+  { level: 5, price: 120000, daily: 28000, duration: 60 },
+  { level: 6, price: 240000, daily: 60000, duration: 60 },
+  { level: 7, price: 300000, daily: 75000, duration: 60 },
+  { level: 8, price: 600000, daily: 150000, duration: 60 },
+  { level: 9, price: 1200000, daily: 400000, duration: 60 },
+  { level: 10, price: 2000000, daily: 600000, duration: 60 }
 ];
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-// Database Connection
-mongoose.connect(MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
+// ======================
+// DATABASE SETUP
+// ======================
+mongoose.connect(MONGO_URI, { 
+  useNewUrlParser: true, 
+  useUnifiedTopology: true 
 })
 .then(() => console.log('✅ MongoDB connected'))
 .catch(err => console.error('❌ MongoDB error:', err));
 
-// Schemas
 const transactionSchema = new mongoose.Schema({
-  type: String,
+  type: { type: String, enum: ['recharge', 'withdrawal', 'vip', 'profit', 'referral'] },
   amount: Number,
   date: { type: Date, default: Date.now },
-  status: { type: String, default: 'pending' }
-}, { _id: false });
+  status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+  details: mongoose.Schema.Types.Mixed
+});
 
 const userSchema = new mongoose.Schema({
+  // Authentication
   username: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  phone: String,
+  
+  // Account Info
   balance: { type: Number, default: 2000 },
+  totalEarnings: { type: Number, default: 0 },
+  referralCode: { type: String, unique: true },
+  referredBy: String,
+  referralEarnings: { type: Number, default: 0 },
+  
+  // VIP Status
   isVIP: { type: Boolean, default: false },
   vipLevel: { type: Number, default: 0 },
-  vipApprovedDate: Date,
+  vipStartDate: Date,
+  vipEndDate: Date,
   lastProfitDate: Date,
-  invitationCode: String,
-  invitedBy: String,
-  hasUsedInvite: { type: Boolean, default: false },
-  referralEarnings: { type: Number, default: 0 },
-  transactions: [transactionSchema],
-  rechargeRequests: [{
-    amount: Number,
-    date: { type: Date, default: Date.now },
-    status: { type: String, default: 'pending' },
-    proof: String
-  }],
-  withdrawalRequests: [{
-    amount: Number,
-    phone: String,
-    network: String,
-    date: { type: Date, default: Date.now },
-    status: { type: String, default: 'pending' }
-  }],
-  vipRequests: [{
-    level: Number,
-    amount: Number,
-    date: { type: Date, default: Date.now },
-    status: { type: String, default: 'pending' }
-  }],
-  referrals: [{
-    email: String,
-    date: { type: Date, default: Date.now },
-    bonus: Number
-  }]
+  
+  // Transactions
+  transactions: [transactionSchema]
 }, { timestamps: true });
 
-const User = mongoose.model('User', userSchema);
-const Admin = mongoose.model('Admin', {
+const adminSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  name: { type: String, default: 'Admin' }
+  permissions: { type: [String], default: ['users', 'transactions', 'vip'] }
 });
 
-// Helper Functions
-const generateToken = (user, isAdmin = false) => {
-  return jwt.sign(
-    { 
-      id: user._id, 
-      email: user.email, 
-      isAdmin,
-      name: user.name || user.username,
-      balance: user.balance,
-      vipLevel: user.vipLevel
-    },
-    JWT_SECRET,
-    { expiresIn: '8h' }
-  );
+const User = mongoose.model('User', userSchema);
+const Admin = mongoose.model('Admin', adminSchema);
+
+// ======================
+// HELPER FUNCTIONS
+// ======================
+const generateToken = (payload) => {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '8h' });
 };
 
 const verifyToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
-  if (!token) return res.status(401).json({ message: 'Access denied' });
+  if (!token) return res.status(401).json({ success: false, message: 'Access denied' });
 
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     next();
-  } catch (error) {
-    res.status(400).json({ message: 'Invalid token' });
+  } catch (err) {
+    res.status(400).json({ success: false, message: 'Invalid token' });
   }
 };
 
-const verifyAdmin = (req, res, next) => {
-  if (!req.user.isAdmin) return res.status(403).json({ message: 'Admin access required' });
+const isAdmin = (req, res, next) => {
+  if (!req.user.isAdmin) return res.status(403).json({ success: false, message: 'Admin access required' });
   next();
 };
 
-// Initialize Default Admin
-const initAdmin = async () => {
-  const adminExists = await Admin.findOne({ email: ADMIN_EMAIL });
-  if (!adminExists) {
-    const hashedPassword = await bcrypt.hash(ADMIN_PASS, 10);
+const createAdmin = async () => {
+  if (!await Admin.findOne({ email: 'admin@aab.com' })) {
     await Admin.create({
-      email: ADMIN_EMAIL,
-      password: hashedPassword,
-      name: 'Admin'
+      email: 'admin@aab.com',
+      password: await bcrypt.hash('admin123', 10),
+      permissions: ['all']
     });
     console.log('👑 Default admin created');
   }
 };
 
-// Routes
+// ======================
+// USER ROUTES
+// ======================
+app.post('/api/register', async (req, res) => {
+  try {
+    const { username, email, password, referralCode } = req.body;
+    
+    // Validation
+    if (await User.findOne({ email })) {
+      return res.status(400).json({ success: false, message: 'Email already exists' });
+    }
 
-// Admin Login
+    // Create user
+    const referral = referralCode ? await User.findOne({ referralCode }) : null;
+    const user = new User({
+      username,
+      email,
+      password: await bcrypt.hash(password, 10),
+      referralCode: Math.random().toString(36).substr(2, 8).toUpperCase(),
+      referredBy: referral?._id,
+      transactions: [{
+        type: 'bonus',
+        amount: 2000,
+        status: 'approved',
+        details: { description: 'Signup bonus' }
+      }]
+    });
+
+    // Add referral bonus
+    if (referral) {
+      referral.balance += 2000;
+      referral.referralEarnings += 2000;
+      referral.transactions.push({
+        type: 'referral',
+        amount: 2000,
+        status: 'approved',
+        details: { referredUser: user.email }
+      });
+      await referral.save();
+    }
+
+    await user.save();
+    
+    // Generate token
+    const token = generateToken({ 
+      id: user._id, 
+      email: user.email, 
+      isAdmin: false 
+    });
+
+    res.status(201).json({ 
+      success: true,
+      message: 'Registration successful',
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        balance: user.balance,
+        isVIP: user.isVIP,
+        vipLevel: user.vipLevel
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Registration failed' });
+  }
+});
+
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+    
+    // Validate
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    // Process VIP profits if applicable
+    if (user.isVIP && user.vipStartDate) {
+      const now = moment();
+      const lastProfit = moment(user.lastProfitDate || user.vipStartDate);
+      
+      if (now.diff(lastProfit, 'days') > 0) {
+        const vipLevel = user.vipLevel;
+        const dailyProfit = VIP_CONFIG.find(v => v.level === vipLevel).daily;
+        
+        user.balance += dailyProfit;
+        user.totalEarnings += dailyProfit;
+        user.lastProfitDate = new Date();
+        
+        user.transactions.push({
+          type: 'profit',
+          amount: dailyProfit,
+          status: 'approved',
+          details: { vipLevel, description: 'Daily VIP profit' }
+        });
+        
+        await user.save();
+      }
+    }
+
+    // Generate token
+    const token = generateToken({
+      id: user._id,
+      email: user.email,
+      isAdmin: false
+    });
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        balance: user.balance,
+        isVIP: user.isVIP,
+        vipLevel: user.vipLevel,
+        referralCode: user.referralCode
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Login failed' });
+  }
+});
+
+// ======================
+// PROTECTED USER ROUTES
+// ======================
+app.use(verifyToken);
+
+app.get('/api/user', async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id)
+      .select('-password -__v');
+      
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to fetch user' });
+  }
+});
+
+app.post('/api/recharge', async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const user = await User.findById(req.user.id);
+    
+    // Validate
+    if (amount < 10000) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Minimum recharge is UGX 10,000' 
+      });
+    }
+
+    // Create transaction
+    user.transactions.push({
+      type: 'recharge',
+      amount,
+      status: 'pending',
+      details: { method: 'Manual' }
+    });
+    
+    await user.save();
+    
+    res.json({
+      success: true,
+      message: 'Recharge request submitted',
+      transaction: user.transactions[user.transactions.length - 1]
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Recharge failed' });
+  }
+});
+
+app.post('/api/withdraw', async (req, res) => {
+  try {
+    const { amount, mobileNumber, network } = req.body;
+    const user = await User.findById(req.user.id);
+    
+    // Validate
+    if (amount < 5000 || amount > 2000000) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Amount must be between UGX 5,000 and 2,000,000' 
+      });
+    }
+    
+    if (user.balance < amount) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Insufficient balance' 
+      });
+    }
+
+    // Create transaction
+    user.transactions.push({
+      type: 'withdrawal',
+      amount: -amount,
+      status: 'pending',
+      details: { mobileNumber, network }
+    });
+    
+    await user.save();
+    
+    res.json({
+      success: true,
+      message: 'Withdrawal request submitted',
+      transaction: user.transactions[user.transactions.length - 1]
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Withdrawal failed' });
+  }
+});
+
+app.post('/api/upgrade-vip', async (req, res) => {
+  try {
+    const { level } = req.body;
+    const user = await User.findById(req.user.id);
+    const vip = VIP_CONFIG.find(v => v.level === level);
+    
+    // Validate
+    if (!vip) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid VIP level' 
+      });
+    }
+    
+    if (user.balance < vip.price) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Insufficient balance' 
+      });
+    }
+
+    // Create transaction
+    user.transactions.push({
+      type: 'vip',
+      amount: -vip.price,
+      status: 'pending',
+      details: { vipLevel: level }
+    });
+    
+    await user.save();
+    
+    res.json({
+      success: true,
+      message: 'VIP upgrade requested',
+      transaction: user.transactions[user.transactions.length - 1]
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'VIP upgrade failed' });
+  }
+});
+
+// ======================
+// ADMIN ROUTES
+// ======================
 app.post('/api/admin/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     const admin = await Admin.findOne({ email });
     
+    // Validate
     if (!admin || !(await bcrypt.compare(password, admin.password))) {
-      return res.status(401).json({ message: 'Invalid admin credentials' });
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid admin credentials' 
+      });
     }
 
-    const token = generateToken(admin, true);
+    // Generate token
+    const token = generateToken({
+      id: admin._id,
+      email: admin.email,
+      isAdmin: true,
+      permissions: admin.permissions
+    });
+
     res.json({
+      success: true,
       message: 'Admin login successful',
+      token,
       admin: {
+        id: admin._id,
         email: admin.email,
-        name: admin.name
-      },
-      token
+        permissions: admin.permissions
+      }
     });
-  } catch (error) {
-    console.error('Admin login error:', error);
-    res.status(500).json({ message: 'Server error' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Admin login failed' });
   }
 });
 
-// User Registration
-app.post('/api/users/register', async (req, res) => {
+app.use(verifyToken);
+app.use(isAdmin);
+
+app.get('/api/admin/dashboard', async (req, res) => {
   try {
-    const { username, email, password, phone, inviteCode = '2233' } = req.body;
+    // Get pending requests
+    const pendingRecharges = await User.aggregate([
+      { $unwind: "$transactions" },
+      { $match: { "transactions.type": "recharge", "transactions.status": "pending" } },
+      { $project: { 
+        userId: "$_id",
+        email: 1,
+        transaction: "$transactions" 
+      }}
+    ]);
     
-    if (await User.findOne({ email })) {
-      return res.status(400).json({ message: 'Email already registered' });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const newUser = new User({
-      username,
-      email,
-      phone,
-      password: hashedPassword,
-      balance: 2000,
-      invitationCode: Math.random().toString(36).substring(2, 10).toUpperCase(),
-      transactions: [{
-        type: 'bonus',
-        amount: 2000,
-        status: 'completed'
-      }]
-    });
-
-    // Process invitation
-    if (inviteCode && inviteCode !== '2233') {
-      const inviter = await User.findOne({ invitationCode: inviteCode });
-      if (inviter) {
-        newUser.invitedBy = inviter.email;
-        newUser.hasUsedInvite = true;
-        
-        inviter.referrals.push({
-          email: newUser.email,
-          bonus: 0
-        });
-        await inviter.save();
-      }
-    }
-
-    await newUser.save();
+    const pendingWithdrawals = await User.aggregate([
+      { $unwind: "$transactions" },
+      { $match: { "transactions.type": "withdrawal", "transactions.status": "pending" } },
+      { $project: { 
+        userId: "$_id",
+        email: 1,
+        transaction: "$transactions" 
+      }}
+    ]);
     
-    const token = generateToken(newUser);
-    res.status(201).json({
-      message: 'User registered successfully',
-      user: {
-        id: newUser._id,
-        username: newUser.username,
-        email: newUser.email,
-        balance: newUser.balance,
-        vipLevel: newUser.vipLevel
-      },
-      token
-    });
-  } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({ message: 'Registration failed' });
-  }
-});
+    const pendingVIP = await User.aggregate([
+      { $unwind: "$transactions" },
+      { $match: { "transactions.type": "vip", "transactions.status": "pending" } },
+      { $project: { 
+        userId: "$_id",
+        email: 1,
+        transaction: "$transactions" 
+      }}
+    ]);
 
-// User Login
-app.post('/api/users/login', async (req, res) => {
-  try {
-    const { email, password, inviteCode = '2233' } = req.body;
-    const user = await User.findOne({ email });
+    // Get stats
+    const totalUsers = await User.countDocuments();
+    const activeVIP = await User.countDocuments({ isVIP: true });
+    const totalBalance = await User.aggregate([
+      { $group: { _id: null, total: { $sum: "$balance" } } }
+    ]);
     
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ message: 'Invalid email or password' });
-    }
-
-    // Process invitation code
-    if (inviteCode && inviteCode !== '2233' && !user.hasUsedInvite) {
-      const inviter = await User.findOne({ invitationCode: inviteCode });
-      if (inviter) {
-        inviter.balance += 2000;
-        inviter.referralEarnings += 2000;
-        inviter.referrals.push({
-          email: user.email,
-          bonus: 2000,
-          date: new Date()
-        });
-        await inviter.save();
-        
-        user.invitedBy = inviter.email;
-        user.hasUsedInvite = true;
-        await user.save();
-      }
-    }
-
-    // Process VIP daily profit
-    if (user.vipLevel > 0 && user.vipApprovedDate) {
-      const now = new Date();
-      const vipStartDate = new Date(user.vipApprovedDate);
-      const daysCompleted = Math.floor((now - vipStartDate) / (1000 * 60 * 60 * 24));
-
-      // Complete VIP cycle after 60 days
-      if (daysCompleted >= 60) {
-        user.vipLevel = 0;
-        user.isVIP = false;
-        user.dailyProfit = 0;
-        await user.save();
-      } else {
-        // Add daily profit if not already added today
-        const today = now.toISOString().split('T')[0];
-        const lastProfitDay = user.lastProfitDate ? 
-          new Date(user.lastProfitDate).toISOString().split('T')[0] : null;
-
-        if (!lastProfitDay || lastProfitDay !== today) {
-          const profit = VIP_LEVELS[user.vipLevel - 1]?.dailyProfit || 0;
-          user.balance += profit;
-          user.totalEarnings += profit;
-          user.lastProfitDate = now;
-          user.transactions.push({
-            type: `VIP ${user.vipLevel} daily profit`,
-            amount: profit,
-            status: 'completed'
-          });
-          await user.save();
+    res.json({
+      success: true,
+      dashboard: {
+        pendingRecharges,
+        pendingWithdrawals,
+        pendingVIP,
+        stats: {
+          totalUsers,
+          activeVIP,
+          totalBalance: totalBalance[0]?.total || 0
         }
       }
-    }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to load dashboard' });
+  }
+});
 
-    const token = generateToken(user);
+app.post('/api/admin/approve', async (req, res) => {
+  try {
+    const { userId, transactionId, action } = req.body;
+    const user = await User.findById(userId);
+    
+    // Find transaction
+    const transaction = user.transactions.id(transactionId);
+    if (!transaction) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Transaction not found' 
+      });
+    }
+    
+    // Process based on type
+    switch (transaction.type) {
+      case 'recharge':
+        if (action === 'approve') {
+          user.balance += transaction.amount;
+        }
+        break;
+        
+      case 'withdrawal':
+        if (action === 'approve') {
+          user.balance += transaction.amount; // Withdrawal amount is negative
+        }
+        break;
+        
+      case 'vip':
+        if (action === 'approve') {
+          const vipLevel = transaction.details.vipLevel;
+          const vip = VIP_CONFIG.find(v => v.level === vipLevel);
+          
+          user.isVIP = true;
+          user.vipLevel = vipLevel;
+          user.vipStartDate = new Date();
+          user.vipEndDate = moment().add(vip.duration, 'days').toDate();
+          user.balance += transaction.amount; // VIP amount is negative
+        }
+        break;
+    }
+    
+    // Update transaction
+    transaction.status = action;
+    await user.save();
+    
     res.json({
-      message: 'Login successful',
+      success: true,
+      message: `Transaction ${action}d successfully`,
       user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
         balance: user.balance,
-        vipLevel: user.vipLevel,
-        dailyProfit: VIP_LEVELS[user.vipLevel - 1]?.dailyProfit || 0
-      },
-      token
-    });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ message: 'Login failed' });
-  }
-});
-
-// Protected Routes
-app.use(verifyToken);
-
-// Get User Data
-app.get('/api/users/me', async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    
-    res.json({
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        phone: user.phone,
-        balance: user.balance,
-        vipLevel: user.vipLevel,
-        dailyProfit: VIP_LEVELS[user.vipLevel - 1]?.dailyProfit || 0,
-        totalEarnings: user.totalEarnings,
-        referralEarnings: user.referralEarnings,
-        invitationCode: user.invitationCode,
-        invitedBy: user.invitedBy,
-        transactions: user.transactions,
-        referrals: user.referrals
+        isVIP: user.isVIP,
+        vipLevel: user.vipLevel
       }
     });
-  } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({ message: 'Failed to get user data' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Approval failed' });
   }
 });
 
-// Recharge Request
-app.post('/api/recharges', async (req, res) => {
-  try {
-    const { amount, proof = "proof.jpg" } = req.body;
-    if (amount < 10000) {
-      return res.status(400).json({ message: 'Minimum recharge is UGX 10,000' });
-    }
-
-    const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    user.rechargeRequests.push({
-      amount,
-      proof,
-      status: 'pending'
-    });
-
-    user.transactions.push({
-      type: 'recharge',
-      amount,
-      status: 'pending'
-    });
-
-    await user.save();
-    res.json({ 
-      message: 'Recharge request submitted!',
-      user: {
-        balance: user.balance,
-        transactions: user.transactions
-      }
-    });
-  } catch (error) {
-    console.error('Recharge error:', error);
-    res.status(500).json({ message: 'Recharge failed' });
-  }
-});
-
-// Withdrawal Request
-app.post('/api/withdrawals', async (req, res) => {
-  try {
-    const { amount, phone, network } = req.body;
-    if (amount < 5000 || amount > 2000000) {
-      return res.status(400).json({ message: 'Amount must be between UGX 5,000 and 2,000,000' });
-    }
-
-    const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-    if (user.balance < amount) {
-      return res.status(400).json({ message: 'Insufficient balance' });
-    }
-
-    user.withdrawalRequests.push({
-      amount,
-      phone,
-      network,
-      status: 'pending'
-    });
-
-    user.transactions.push({
-      type: 'withdrawal',
-      amount: -amount,
-      status: 'pending'
-    });
-
-    await user.save();
-    res.json({ 
-      message: 'Withdrawal request submitted!',
-      user: {
-        balance: user.balance,
-        transactions: user.transactions
-      }
-    });
-  } catch (error) {
-    console.error('Withdrawal error:', error);
-    res.status(500).json({ message: 'Withdrawal failed' });
-  }
-});
-
-// VIP Purchase
-app.post('/api/vip/purchase', async (req, res) => {
-  try {
-    const { vipLevel } = req.body;
-    const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    const price = VIP_LEVELS[vipLevel - 1]?.price;
-    if (!price) return res.status(400).json({ message: 'Invalid VIP level' });
-    if (user.balance < price) {
-      return res.status(400).json({ message: 'Insufficient balance' });
-    }
-
-    user.vipRequests.push({
-      level: vipLevel,
-      amount: price,
-      status: 'pending'
-    });
-
-    user.transactions.push({
-      type: `VIP ${vipLevel} purchase`,
-      amount: -price,
-      status: 'pending'
-    });
-
-    await user.save();
-    res.json({ 
-      message: 'VIP purchase requested!',
-      user: {
-        balance: user.balance,
-        transactions: user.transactions
-      }
-    });
-  } catch (error) {
-    console.error('VIP purchase error:', error);
-    res.status(500).json({ message: 'VIP purchase failed' });
-  }
-});
-
-// Admin Routes
-app.use(verifyAdmin);
-
-// Approve Recharge
-app.post('/api/admin/recharges/approve', async (req, res) => {
-  try {
-    const { userId, requestId } = req.body;
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    const request = user.rechargeRequests.id(requestId);
-    if (!request || request.status !== 'pending') {
-      return res.status(400).json({ message: 'Invalid request' });
-    }
-
-    user.balance += request.amount;
-    request.status = 'approved';
-    
-    const transaction = user.transactions.find(
-      t => t.amount === request.amount && t.type === 'recharge' && t.status === 'pending'
-    );
-    if (transaction) transaction.status = 'completed';
-
-    await user.save();
-    res.json({ message: 'Recharge approved', user });
-  } catch (error) {
-    console.error('Approval error:', error);
-    res.status(500).json({ message: 'Approval failed' });
-  }
-});
-
-// Approve Withdrawal
-app.post('/api/admin/withdrawals/approve', async (req, res) => {
-  try {
-    const { userId, requestId } = req.body;
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    const request = user.withdrawalRequests.id(requestId);
-    if (!request || request.status !== 'pending') {
-      return res.status(400).json({ message: 'Invalid request' });
-    }
-
-    request.status = 'approved';
-    
-    const transaction = user.transactions.find(
-      t => t.amount === -request.amount && t.type === 'withdrawal' && t.status === 'pending'
-    );
-    if (transaction) transaction.status = 'completed';
-
-    await user.save();
-    res.json({ message: 'Withdrawal approved', user });
-  } catch (error) {
-    console.error('Approval error:', error);
-    res.status(500).json({ message: 'Approval failed' });
-  }
-});
-
-// Approve VIP
-app.post('/api/admin/vip/approve', async (req, res) => {
-  try {
-    const { userId, requestId } = req.body;
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    const request = user.vipRequests.id(requestId);
-    if (!request || request.status !== 'pending') {
-      return res.status(400).json({ message: 'Invalid request' });
-    }
-
-    const vipInfo = VIP_LEVELS[request.level - 1];
-    if (!vipInfo) return res.status(400).json({ message: 'Invalid VIP level' });
-
-    user.isVIP = true;
-    user.vipLevel = request.level;
-    user.vipApprovedDate = new Date();
-    user.dailyProfit = vipInfo.dailyProfit;
-    request.status = 'approved';
-    
-    const transaction = user.transactions.find(
-      t => t.amount === -request.amount && t.type.includes('VIP') && t.status === 'pending'
-    );
-    if (transaction) transaction.status = 'completed';
-
-    await user.save();
-    res.json({ message: 'VIP approved', user });
-  } catch (error) {
-    console.error('VIP approval error:', error);
-    res.status(500).json({ message: 'VIP approval failed' });
-  }
-});
-
-// Get All Users
 app.get('/api/admin/users', async (req, res) => {
   try {
-    const users = await User.find({}, { password: 0 });
-    res.json(users);
-  } catch (error) {
-    console.error('Get users error:', error);
-    res.status(500).json({ message: 'Failed to get users' });
+    const users = await User.find()
+      .select('-password -__v')
+      .sort({ createdAt: -1 });
+      
+    res.json({ success: true, users });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to fetch users' });
   }
 });
 
-// Start Server
+app.get('/api/admin/transactions', async (req, res) => {
+  try {
+    const { type, status, page = 1, limit = 20 } = req.query;
+    
+    const query = {};
+    if (type) query['transactions.type'] = type;
+    if (status) query['transactions.status'] = status;
+    
+    const users = await User.find(query)
+      .select('email transactions')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit);
+      
+    // Flatten transactions
+    const transactions = users.reduce((acc, user) => {
+      user.transactions.forEach(t => {
+        if ((!type || t.type === type) && (!status || t.status === status)) {
+          acc.push({
+            ...t.toObject(),
+            userId: user._id,
+            userEmail: user.email
+          });
+        }
+      });
+      return acc;
+    }, []);
+    
+    res.json({ success: true, transactions });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Failed to fetch transactions' });
+  }
+});
+
+// ======================
+// SERVER START
+// ======================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, async () => {
-  await initAdmin();
+  await createAdmin();
   console.log(`🚀 Server running on port ${PORT}`);
 });
