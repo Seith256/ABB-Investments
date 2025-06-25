@@ -5,12 +5,10 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const moment = require('moment');
-import express from 'express';
-import jwt from 'jsonwebtoken';
-import dotenv from 'dotenv';
 
-dotenv.config();
 const app = express();
+app.use(express.json());
+app.use(cors());
 
 // ======================
 // CONFIGURATION
@@ -48,26 +46,19 @@ const transactionSchema = new mongoose.Schema({
 });
 
 const userSchema = new mongoose.Schema({
-  // Authentication
   username: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  
-  // Account Info
   balance: { type: Number, default: 2000 },
   totalEarnings: { type: Number, default: 0 },
   referralCode: { type: String, unique: true },
   referredBy: String,
   referralEarnings: { type: Number, default: 0 },
-  
-  // VIP Status
   isVIP: { type: Boolean, default: false },
   vipLevel: { type: Number, default: 0 },
   vipStartDate: Date,
   vipEndDate: Date,
   lastProfitDate: Date,
-  
-  // Transactions
   transactions: [transactionSchema]
 }, { timestamps: true });
 
@@ -80,9 +71,6 @@ const adminSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 const Admin = mongoose.model('Admin', adminSchema);
 
-// ======================
-// HELPER FUNCTIONS
-// ======================
 const generateToken = (payload) => {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '8h' });
 };
@@ -90,7 +78,6 @@ const generateToken = (payload) => {
 const verifyToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.status(401).json({ success: false, message: 'Access denied' });
-
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     next();
@@ -114,134 +101,6 @@ const createAdmin = async () => {
     console.log('👑 Default admin created');
   }
 };
-
-// ======================
-// USER ROUTES
-// ======================
-app.post('/api/register', async (req, res) => {
-  try {
-    const { username, email, password, referralCode } = req.body;
-    
-    // Validation
-    if (await User.findOne({ email })) {
-      return res.status(400).json({ success: false, message: 'Email already exists' });
-    }
-
-    // Create user
-    const referral = referralCode ? await User.findOne({ referralCode }) : null;
-    const user = new User({
-      username,
-      email,
-      password: await bcrypt.hash(password, 10),
-      referralCode: Math.random().toString(36).substr(2, 8).toUpperCase(),
-      referredBy: referral?._id,
-      transactions: [{
-        type: 'bonus',
-        amount: 2000,
-        status: 'approved',
-        details: { description: 'Signup bonus' }
-      }]
-    });
-
-    // Add referral bonus
-    if (referral) {
-      referral.balance += 2000;
-      referral.referralEarnings += 2000;
-      referral.transactions.push({
-        type: 'referral',
-        amount: 2000,
-        status: 'approved',
-        details: { referredUser: user.email }
-      });
-      await referral.save();
-    }
-
-    await user.save();
-    
-    // Generate token
-    const token = generateToken({ 
-      id: user._id, 
-      email: user.email, 
-      isAdmin: false 
-    });
-
-    res.status(201).json({ 
-      success: true,
-      message: 'Registration successful',
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        balance: user.balance,
-        isVIP: user.isVIP,
-        vipLevel: user.vipLevel
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Registration failed' });
-  }
-});
-
-app.post('/api/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const user = await User.findOne({ email });
-    
-    // Validate
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
-
-    // Process VIP profits if applicable
-    if (user.isVIP && user.vipStartDate) {
-      const now = moment();
-      const lastProfit = moment(user.lastProfitDate || user.vipStartDate);
-      
-      if (now.diff(lastProfit, 'days') > 0) {
-        const vipLevel = user.vipLevel;
-        const dailyProfit = VIP_CONFIG.find(v => v.level === vipLevel).daily;
-        
-        user.balance += dailyProfit;
-        user.totalEarnings += dailyProfit;
-        user.lastProfitDate = new Date();
-        
-        user.transactions.push({
-          type: 'profit',
-          amount: dailyProfit,
-          status: 'approved',
-          details: { vipLevel, description: 'Daily VIP profit' }
-        });
-        
-        await user.save();
-      }
-    }
-
-    // Generate token
-    const token = generateToken({
-      id: user._id,
-      email: user.email,
-      isAdmin: false
-    });
-
-    res.json({
-      success: true,
-      message: 'Login successful',
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        balance: user.balance,
-        isVIP: user.isVIP,
-        vipLevel: user.vipLevel,
-        referralCode: user.referralCode
-      }
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Login failed' });
-  }
-});
 
 // ======================
 // PROTECTED USER ROUTES
@@ -579,9 +438,6 @@ app.get('/api/admin/transactions', async (req, res) => {
   }
 });
 
-// ======================
-// SERVER START
-// ======================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, async () => {
   await createAdmin();
