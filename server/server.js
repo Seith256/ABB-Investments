@@ -5,7 +5,11 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const moment = require('moment');
+import express from 'express';
+import jwt from 'jsonwebtoken';
+import dotenv from 'dotenv';
 
+dotenv.config();
 const app = express();
 
 // ======================
