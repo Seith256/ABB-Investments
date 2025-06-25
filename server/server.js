@@ -105,7 +105,7 @@ const createAdmin = async () => {
 // ======================
 // USER AUTH ROUTES (PUBLIC)
 // ======================
-app.post('/api/register', async (req, res) => {
+app.post('/api/signup', async (req, res) => {
   try {
     const { username, email, password, referralCode } = req.body;
     
