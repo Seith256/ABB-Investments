@@ -1,349 +1,430 @@
-// JWT Token Management
-let authToken = null;
-let currentUser = null;
-
-// VIP Configuration (unchanged)
+// ======================
+// Configuration
+// ======================
+const API_BASE_URL = "https://abb-backend.onrender.com/api";
+const DEFAULT_INVITE_CODE = '2233';
+const ADMIN_EMAIL = "admin@aab.com"; // Default admin email (fallback)
 const VIP_DAILY_PROFITS = [1800, 6000, 10000, 13000, 28000, 60000, 75000, 150000, 400000, 600000];
 const VIP_PRICES = [10000, 30000, 50000, 80000, 120000, 240000, 300000, 600000, 1200000, 2000000];
 
-// API Configuration
-const API_BASE_URL = 'http://localhost:5000/api'; // Update with your backend URL
+// ======================
+// Database Initialization
+// ======================
+const usersDB = JSON.parse(localStorage.getItem('aab_users')) || [];
+const adminDB = JSON.parse(localStorage.getItem('aab_admin')) || [
+    { 
+        email: ADMIN_EMAIL, 
+        password: 'admin123', 
+        name: 'Admin',
+        permissions: ['full'],
+        lastLogin: null
+    }
+];
 
-// Helper Functions
-const storeToken = (token) => {
-  authToken = token;
-  localStorage.setItem('aab_authToken', token);
-};
+// Initialize default admin if not exists
+if (!localStorage.getItem('aab_admin')) {
+    localStorage.setItem('aab_admin', JSON.stringify(adminDB));
+}
 
-const getToken = () => {
-  if (!authToken) {
-    authToken = localStorage.getItem('aab_authToken');
-  }
-  return authToken;
-};
-
-const clearAuth = () => {
-  authToken = null;
-  currentUser = null;
-  localStorage.removeItem('aab_authToken');
-};
-
-const decodeToken = (token) => {
-  try {
-    if (!token) return null;
-    const base64Url = token.split('.')[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    return JSON.parse(window.atob(base64));
-  } catch (error) {
-    console.error('Error decoding token:', error);
-    return null;
-  }
-};
-
-const fetchWithAuth = async (url, options = {}) => {
-  const token = getToken();
-  const headers = {
-    'Content-Type': 'application/json',
-    ...options.headers
-  };
-
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
-  const response = await fetch(`${API_BASE_URL}${url}`, {
-    ...options,
-    headers
-  });
-
-  if (response.status === 401) {
-    // Token expired or invalid
-    clearAuth();
-    window.location.href = 'login.html';
-    return;
-  }
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Request failed');
-  }
-
-  return response.json();
-};
-
-const loadCurrentUser = async () => {
-  try {
-    const data = await fetchWithAuth('/users/me');
-    currentUser = data.user;
-    return currentUser;
-  } catch (error) {
-    console.error('Failed to load user:', error);
-    return null;
-  }
-};
+// Current session
+let currentUser = JSON.parse(sessionStorage.getItem('aab_currentUser'));
+let currentAdmin = JSON.parse(sessionStorage.getItem('aab_currentAdmin'));
 
 // ======================
-// UPDATED LOGIN/SIGNUP
+// Authentication Functions
+// ======================
+
+/**
+ * Authenticate admin (tries backend first, falls back to local)
+ */
+async function authenticateAdmin(email, password) {
+    try {
+        // Try backend authentication first
+        const response = await fetch(`${API_BASE_URL}/admin/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            return {
+                ...data.admin,
+                isAuthenticated: true,
+                authSource: 'backend',
+                token: data.token
+            };
+        }
+    } catch (error) {
+        console.warn("Backend admin auth failed, trying local:", error);
+    }
+
+    // Fallback to local authentication
+    const admin = adminDB.find(a => a.email === email && a.password === password);
+    return admin 
+        ? { ...admin, isAuthenticated: true, authSource: 'local' }
+        : { isAuthenticated: false, error: "Invalid credentials" };
+}
+
+/**
+ * Authenticate user (backend only)
+ */
+async function authenticateUser(email, password) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/users/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || "Login failed");
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error("User auth failed:", error);
+        throw error;
+    }
+}
+
+/**
+ * Register new user
+ */
+async function registerUser(userData) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/users/register`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(userData)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.message || "Registration failed");
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error("Registration failed:", error);
+        throw error;
+    }
+}
+
+// ======================
+// Session Management
+// ======================
+
+function startUserSession(user) {
+    const userSession = {
+        id: user._id || user.id,
+        name: user.username || user.name,
+        email: user.email,
+        phone: user.phone || '',
+        balance: user.balance || 2000, // Default welcome bonus
+        vipLevel: user.vipLevel || 0,
+        dailyProfit: VIP_DAILY_PROFITS[user.vipLevel] || 0,
+        lastProfitDate: user.lastProfitDate || null,
+        vipApprovedDate: user.vipApprovedDate || null,
+        transactions: user.transactions || [
+            {
+                type: 'bonus',
+                amount: 2000,
+                date: new Date().toISOString(),
+                status: 'completed'
+            }
+        ]
+    };
+
+    sessionStorage.setItem('aab_currentUser', JSON.stringify(userSession));
+    return userSession;
+}
+
+function startAdminSession(admin, token = null) {
+    const adminSession = {
+        email: admin.email,
+        name: admin.name,
+        permissions: admin.permissions || ['basic'],
+        lastLogin: new Date().toISOString(),
+        authSource: admin.authSource,
+        token
+    };
+
+    if (token) {
+        sessionStorage.setItem('admin_token', token);
+    }
+    sessionStorage.setItem('aab_currentAdmin', JSON.stringify(adminSession));
+    return adminSession;
+}
+
+function endSession() {
+    sessionStorage.removeItem('aab_currentUser');
+    sessionStorage.removeItem('aab_currentAdmin');
+    sessionStorage.removeItem('admin_token');
+}
+
+// ======================
+// VIP Management
+// ======================
+
+function processVIPDailyProfit(user) {
+    if (!user.vipLevel || !user.vipApprovedDate) return user;
+
+    const now = new Date();
+    const vipStartDate = new Date(user.vipApprovedDate);
+    const daysCompleted = Math.floor((now - vipStartDate) / (1000 * 60 * 60 * 24));
+
+    // Check if cycle completed
+    if (daysCompleted >= 60) {
+        user.vipLevel = 0;
+        user.dailyProfit = 0;
+        alert('Your VIP cycle of 60 days has been completed successfully!');
+        return user;
+    }
+
+    // Add daily profit if needed
+    const today = now.toISOString().split('T')[0];
+    const lastProfitDay = user.lastProfitDate 
+        ? new Date(user.lastProfitDate).toISOString().split('T')[0] 
+        : null;
+
+    if (!lastProfitDay || lastProfitDay !== today) {
+        const profit = VIP_DAILY_PROFITS[user.vipLevel - 1] || 0;
+        user.balance += profit;
+        user.lastProfitDate = now.toISOString();
+        user.transactions.push({
+            type: `VIP ${user.vipLevel} daily profit (Day ${daysCompleted + 1}/60)`,
+            amount: profit,
+            date: now.toISOString(),
+            status: 'completed'
+        });
+    }
+
+    return user;
+}
+
+// ======================
+// Form Handlers
 // ======================
 
 // Login Form
 if (document.getElementById('login-form')) {
-  document.getElementById('login-form').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    
-    const email = document.getElementById('login-email').value;
-    const password = document.getElementById('login-password').value;
-    const inviteCode = document.getElementById('login-invite').value || '2233';
-    const isAdmin = document.getElementById('login-admin').checked;
-    
-    try {
-      if (isAdmin) {
-        // Admin login
-        const response = await fetch(`${API_BASE_URL}/admin/login`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ email, password })
-        });
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const email = document.getElementById('login-email').value;
+        const password = document.getElementById('login-password').value;
+        const isAdmin = document.getElementById('login-admin').checked;
 
-        if (!response.ok) {
-          throw new Error('Invalid admin credentials');
+        try {
+            if (isAdmin) {
+                // Admin login flow
+                const authResult = await authenticateAdmin(email, password);
+                
+                if (!authResult.isAuthenticated) {
+                    throw new Error(authResult.error || "Admin authentication failed");
+                }
+
+                currentAdmin = startAdminSession(authResult, authResult.token);
+                window.location.href = 'admin.html';
+            } else {
+                // User login flow
+                const authResult = await authenticateUser(email, password);
+                currentUser = startUserSession(authResult.user);
+                
+                // Process local user data
+                const localUser = usersDB.find(u => u.email === email) || {
+                    ...currentUser,
+                    invitationCode: Math.random().toString(36).substr(2, 8).toUpperCase(),
+                    referrals: [],
+                    rechargeRequests: [],
+                    withdrawalRequests: [],
+                    vipRequests: []
+                };
+                
+                if (!usersDB.some(u => u.email === email)) {
+                    usersDB.push(localUser);
+                    localStorage.setItem('aab_users', JSON.stringify(usersDB));
+                }
+
+                // Process VIP status if applicable
+                if (currentUser.vipLevel > 0) {
+                    currentUser = processVIPDailyProfit(currentUser);
+                    sessionStorage.setItem('aab_currentUser', JSON.stringify(currentUser));
+                }
+
+                window.location.href = 'index.html';
+            }
+        } catch (error) {
+            console.error("Login error:", error);
+            alert(error.message || "Authentication failed");
         }
-
-        const data = await response.json();
-        storeToken(data.token);
-        window.location.href = 'admin.html';
-      } else {
-        // User login
-        const response = await fetch(`${API_BASE_URL}/users/login`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ email, password, inviteCode })
-        });
-
-        if (!response.ok) {
-          throw new Error('Invalid email or password');
-        }
-
-        const data = await response.json();
-        storeToken(data.token);
-        currentUser = data.user;
-        window.location.href = 'index.html';
-      }
-    } catch (error) {
-      alert(error.message);
-      console.error('Login error:', error);
-    }
-  });
+    });
 }
 
 // Signup Form
 if (document.getElementById('signup-form')) {
-  document.getElementById('signup-form').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    
-    const name = document.getElementById('signup-name').value;
-    const email = document.getElementById('signup-email').value;
-    const phone = document.getElementById('signup-phone').value;
-    const password = document.getElementById('signup-password').value;
-    const confirmPassword = document.getElementById('signup-confirm').value;
-    const inviteCode = document.getElementById('signup-invite').value || '2233';
-    
-    if (password !== confirmPassword) {
-      alert('Passwords do not match');
-      return;
-    }
+    document.getElementById('signup-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const userData = {
+            username: document.getElementById('signup-name').value,
+            email: document.getElementById('signup-email').value,
+            phone: document.getElementById('signup-phone').value,
+            password: document.getElementById('signup-password').value
+        };
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/users/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ name, email, phone, password, inviteCode })
-      });
+        if (userData.password !== document.getElementById('signup-confirm').value) {
+            alert("Passwords don't match");
+            return;
+        }
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Registration failed');
-      }
+        try {
+            // Register with backend
+            const result = await registerUser(userData);
+            
+            // Create local user record
+            const newUser = {
+                ...result.user,
+                balance: 2000, // Welcome bonus
+                invitationCode: Math.random().toString(36).substr(2, 8).toUpperCase(),
+                transactions: [
+                    {
+                        type: 'bonus',
+                        amount: 2000,
+                        date: new Date().toISOString(),
+                        status: 'completed'
+                    }
+                ],
+                referrals: [],
+                rechargeRequests: [],
+                withdrawalRequests: [],
+                vipRequests: []
+            };
 
-      const data = await response.json();
-      storeToken(data.token);
-      currentUser = data.user;
-      window.location.href = 'index.html';
-    } catch (error) {
-      alert(error.message);
-      console.error('Registration error:', error);
-    }
-  });
+            usersDB.push(newUser);
+            localStorage.setItem('aab_users', JSON.stringify(usersDB));
+            
+            // Start session
+            currentUser = startUserSession(newUser);
+            alert("Registration successful!");
+            window.location.href = 'index.html';
+
+        } catch (error) {
+            console.error("Signup error:", error);
+            alert(error.message || "Registration failed");
+        }
+    });
 }
 
 // ======================
-// UPDATED FUNCTIONALITY
+// Admin Approval Functions
 // ======================
 
-// Initialize authentication on page load
-document.addEventListener('DOMContentLoaded', async function() {
-  // Check for existing token
-  const token = getToken();
-  if (token) {
-    const decoded = decodeToken(token);
-    if (decoded) {
-      currentUser = {
-        id: decoded.id,
-        name: decoded.name,
-        email: decoded.email,
-        balance: decoded.balance,
-        vipLevel: decoded.vipLevel
-      };
-      
-      // Load full user data if needed
-      if (window.location.pathname !== '/login.html') {
-        await loadCurrentUser();
-      }
+async function approveRequest(type, userId, requestId) {
+    if (!currentAdmin) {
+        alert("Admin session expired");
+        window.location.href = 'admin-login.html';
+        return;
     }
-  }
 
-  // Logout functionality
-  const logoutButtons = document.querySelectorAll('#logout-btn, #admin-logout-btn');
-  logoutButtons.forEach(btn => {
-    btn.addEventListener('click', function(e) {
-      e.preventDefault();
-      clearAuth();
-      window.location.href = 'login.html';
+    try {
+        // Update locally
+        const userIndex = usersDB.findIndex(u => u.id === userId);
+        if (userIndex === -1) throw new Error("User not found");
+
+        const requestArray = `${type}Requests`;
+        const requestIndex = usersDB[userIndex][requestArray].findIndex(r => r.id === requestId);
+        if (requestIndex === -1) throw new Error("Request not found");
+
+        // Process based on type
+        switch (type) {
+            case 'recharge':
+                usersDB[userIndex].balance += usersDB[userIndex][requestArray][requestIndex].amount;
+                break;
+                
+            case 'withdrawal':
+                usersDB[userIndex].balance -= usersDB[userIndex][requestArray][requestIndex].amount;
+                break;
+                
+            case 'vip':
+                const vipLevel = usersDB[userIndex][requestArray][requestIndex].level;
+                usersDB[userIndex].vipLevel = vipLevel;
+                usersDB[userIndex].dailyProfit = VIP_DAILY_PROFITS[vipLevel - 1];
+                usersDB[userIndex].vipApprovedDate = new Date().toISOString();
+                break;
+        }
+
+        usersDB[userIndex][requestArray][requestIndex].status = 'approved';
+
+        // Sync with backend
+        try {
+            await fetch(`${API_BASE_URL}/${type}/approve`, {
+                method: "POST",
+                headers: { 
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${sessionStorage.getItem('admin_token')}`
+                },
+                body: JSON.stringify({ userId, requestId })
+            });
+        } catch (syncError) {
+            console.warn("Backend sync failed, proceeding locally");
+        }
+
+        localStorage.setItem('aab_users', JSON.stringify(usersDB));
+        return { success: true, user: usersDB[userIndex] };
+
+    } catch (error) {
+        console.error(`Approval failed (${type}):`, error);
+        return { success: false, error: error.message };
+    }
+}
+
+// ======================
+// Initialization
+// ======================
+
+function initAuth() {
+    // Check authentication state on page load
+    if (window.location.pathname.includes('admin') && !currentAdmin) {
+        window.location.href = 'login.html';
+        return;
+    }
+
+    if (!window.location.pathname.includes('login') && 
+        !window.location.pathname.includes('signup') && 
+        !currentUser && !currentAdmin) {
+        window.location.href = 'login.html';
+        return;
+    }
+
+    // Process VIP profits if user is VIP
+    if (currentUser?.vipLevel > 0) {
+        currentUser = processVIPDailyProfit(currentUser);
+        sessionStorage.setItem('aab_currentUser', JSON.stringify(currentUser));
+        
+        // Check every hour for VIP updates
+        setInterval(() => {
+            currentUser = processVIPDailyProfit(JSON.parse(sessionStorage.getItem('aab_currentUser')));
+            sessionStorage.setItem('aab_currentUser', JSON.stringify(currentUser));
+        }, 3600000);
+    }
+}
+
+// Logout functionality
+function setupLogout() {
+    document.querySelectorAll('.logout-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            endSession();
+            window.location.href = 'login.html';
+        });
     });
-  });
+}
 
-  // Process VIP profits on page load for authenticated users
-  if (currentUser && currentUser.vipLevel > 0) {
-    // This is now handled server-side during login
-    // We just need to display the updated user data
-    await loadCurrentUser();
-  }
-
-  // Setup other functionality
-  setupRecharge();
-  setupWithdrawal();
-  setupVIPPurchase();
+// Initialize everything
+document.addEventListener('DOMContentLoaded', () => {
+    initAuth();
+    setupLogout();
 });
-
-// Recharge Functionality (updated)
-function setupRecharge() {
-  const rechargeForm = document.getElementById('recharge-form');
-  if (!rechargeForm) return;
-
-  rechargeForm.addEventListener('submit', async function(e) {
-    e.preventDefault();
-    const amount = parseInt(document.getElementById('recharge-amount').value);
-    const proof = "proof.jpg"; // In real app, handle file upload
-
-    if (amount < 10000) {
-      alert('Minimum recharge is UGX 10,000');
-      return;
-    }
-
-    try {
-      const response = await fetchWithAuth('/recharges', {
-        method: 'POST',
-        body: JSON.stringify({ amount, proof })
-      });
-
-      alert('Recharge request submitted!');
-      rechargeForm.reset();
-      
-      // Refresh user data
-      await loadCurrentUser();
-      updateUI();
-    } catch (error) {
-      alert(error.message);
-      console.error('Recharge error:', error);
-    }
-  });
-}
-
-// Withdrawal Functionality (updated)
-function setupWithdrawal() {
-  const withdrawForm = document.getElementById('withdraw-form');
-  if (!withdrawForm) return;
-
-  withdrawForm.addEventListener('submit', async function(e) {
-    e.preventDefault();
-    const amount = parseInt(document.getElementById('withdraw-amount').value);
-    const phone = document.getElementById('withdraw-number').value;
-    const network = document.getElementById('withdraw-network').value;
-
-    if (amount < 5000 || amount > 2000000) {
-      alert('Amount must be between UGX 5,000 and 2,000,000');
-      return;
-    }
-
-    try {
-      const response = await fetchWithAuth('/withdrawals', {
-        method: 'POST',
-        body: JSON.stringify({ amount, phone, network })
-      });
-
-      alert('Withdrawal request submitted!');
-      withdrawForm.reset();
-      
-      // Refresh user data
-      await loadCurrentUser();
-      updateUI();
-    } catch (error) {
-      alert(error.message);
-      console.error('Withdrawal error:', error);
-    }
-  });
-}
-
-// VIP Purchase (updated)
-function setupVIPPurchase() {
-  const confirmBtn = document.getElementById('confirm-vip-btn');
-  if (!confirmBtn) return;
-
-  confirmBtn.addEventListener('click', async function() {
-    const vipLevel = parseInt(document.getElementById('vip-modal-title').textContent.match(/\d+/)[0]);
-    const price = VIP_PRICES[vipLevel - 1];
-
-    try {
-      const response = await fetchWithAuth('/vip/purchase', {
-        method: 'POST',
-        body: JSON.stringify({ vipLevel })
-      });
-
-      alert('VIP purchase requested!');
-      
-      // Refresh user data
-      await loadCurrentUser();
-      updateUI();
-    } catch (error) {
-      alert(error.message);
-      console.error('VIP purchase error:', error);
-    }
-  });
-}
-
-// Update UI with current user data
-function updateUI() {
-  if (!currentUser) return;
-
-  // Update balance display
-  const balanceElements = document.querySelectorAll('.user-balance');
-  balanceElements.forEach(el => {
-    el.textContent = currentUser.balance;
-  });
-
-  // Update VIP status
-  if (currentUser.vipLevel > 0) {
-    const vipElements = document.querySelectorAll('.vip-status');
-    vipElements.forEach(el => {
-      el.textContent = `VIP ${currentUser.vipLevel}`;
-    });
-  }
-
-  // Update other user-specific UI elements as needed
-}
