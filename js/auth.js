@@ -1,344 +1,349 @@
-// Current user session
-let currentUser = JSON.parse(sessionStorage.getItem('aab_currentUser'));
-let currentAdmin = JSON.parse(sessionStorage.getItem('aab_currentAdmin'));
+// JWT Token Management
+let authToken = null;
+let currentUser = null;
 
-// VIP Configuration (unchanged from original)
+// VIP Configuration (unchanged)
 const VIP_DAILY_PROFITS = [1800, 6000, 10000, 13000, 28000, 60000, 75000, 150000, 400000, 600000];
 const VIP_PRICES = [10000, 30000, 50000, 80000, 120000, 240000, 300000, 600000, 1200000, 2000000];
 
+// API Configuration
+const API_BASE_URL = 'http://localhost:5000/api'; // Update with your backend URL
+
+// Helper Functions
+const storeToken = (token) => {
+  authToken = token;
+  localStorage.setItem('aab_authToken', token);
+};
+
+const getToken = () => {
+  if (!authToken) {
+    authToken = localStorage.getItem('aab_authToken');
+  }
+  return authToken;
+};
+
+const clearAuth = () => {
+  authToken = null;
+  currentUser = null;
+  localStorage.removeItem('aab_authToken');
+};
+
+const decodeToken = (token) => {
+  try {
+    if (!token) return null;
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(window.atob(base64));
+  } catch (error) {
+    console.error('Error decoding token:', error);
+    return null;
+  }
+};
+
+const fetchWithAuth = async (url, options = {}) => {
+  const token = getToken();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${url}`, {
+    ...options,
+    headers
+  });
+
+  if (response.status === 401) {
+    // Token expired or invalid
+    clearAuth();
+    window.location.href = 'login.html';
+    return;
+  }
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Request failed');
+  }
+
+  return response.json();
+};
+
+const loadCurrentUser = async () => {
+  try {
+    const data = await fetchWithAuth('/users/me');
+    currentUser = data.user;
+    return currentUser;
+  } catch (error) {
+    console.error('Failed to load user:', error);
+    return null;
+  }
+};
+
 // ======================
-// ORIGINAL LOGIN/SIGNUP (UNCHANGED)
+// UPDATED LOGIN/SIGNUP
 // ======================
 
-// Login Form (original code)
+// Login Form
 if (document.getElementById('login-form')) {
-    document.getElementById('login-form').addEventListener('submit', function(e) {
-        e.preventDefault();
-        
-        const email = document.getElementById('login-email').value;
-        const password = document.getElementById('login-password').value;
-        const inviteCode = document.getElementById('login-invite').value || '2233';
-        const isAdmin = document.getElementById('login-admin').checked;
-        
-        if (isAdmin) {
-            // Admin login (original)
-            const admin = adminDB.find(a => a.email === email && a.password === password);
-            if (admin) {
-                sessionStorage.setItem('aab_currentAdmin', JSON.stringify(admin));
-                window.location.href = 'admin.html';
-            } else {
-                alert('Invalid admin credentials');
-            }
-        } else {
-            // User login (original)
-            const user = usersDB.find(u => u.email === email && u.password === password);
-            if (user) {
-                // Original invitation code processing
-                if (inviteCode && inviteCode !== '2233' && !user.hasUsedInvite) {
-                    const inviter = usersDB.find(u => u.invitationCode === inviteCode);
-                    if (inviter) {
-                        inviter.balance += 2000;
-                        inviter.referralEarnings += 2000;
-                        inviter.referrals.push({
-                            email: user.email,
-                            date: new Date().toISOString(),
-                            bonus: 2000
-                        });
-                        user.invitedBy = inviter.email;
-                        user.hasUsedInvite = true;
-                        localStorage.setItem('aab_users', JSON.stringify(usersDB));
-                    }
-                }
-                
-                sessionStorage.setItem('aab_currentUser', JSON.stringify(user));
-                window.location.href = 'index.html';
-            } else {
-                alert('Invalid email or password');
-            }
-        }
-    });
-}
-
-// Signup Form (original code)
-if (document.getElementById('signup-form')) {
-    document.getElementById('signup-form').addEventListener('submit', function(e) {
-        e.preventDefault();
-        
-        const name = document.getElementById('signup-name').value;
-        const email = document.getElementById('signup-email').value;
-        const phone = document.getElementById('signup-phone').value;
-        const password = document.getElementById('signup-password').value;
-        const confirmPassword = document.getElementById('signup-confirm').value;
-        const inviteCode = document.getElementById('signup-invite').value || '2233';
-        
-        if (password !== confirmPassword) {
-            alert('Passwords do not match');
-            return;
-        }
-        
-        if (usersDB.some(u => u.email === email)) {
-            alert('Email already registered');
-            return;
-        }
-        
-        // Original user creation
-        const newUser = {
-            id: Date.now().toString(),
-            name,
-            email,
-            phone,
-            password,
-            balance: 2000,
-            invitationCode: Math.floor(1000 + Math.random() * 9000).toString(),
-            invitedBy: null,
-            hasUsedInvite: false,
-            vipLevel: 0,
-            dailyProfit: 0,
-            totalEarnings: 0,
-            referralEarnings: 0,
-            referrals: [],
-            transactions: [
-                {
-                    type: 'bonus',
-                    amount: 2000,
-                    date: new Date().toISOString(),
-                    status: 'completed'
-                }
-            ],
-            rechargeRequests: [],
-            withdrawalRequests: [],
-            vipRequests: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-        };
-        
-        // Original invitation processing
-        if (inviteCode && inviteCode !== '2233') {
-            const inviter = usersDB.find(u => u.invitationCode === inviteCode);
-            if (inviter) {
-                newUser.invitedBy = inviter.email;
-                newUser.hasUsedInvite = true;
-                inviter.referrals.push({
-                    email: newUser.email,
-                    date: new Date().toISOString(),
-                    bonus: 0
-                });
-            }
-        }
-        
-        usersDB.push(newUser);
-        localStorage.setItem('aab_users', JSON.stringify(usersDB));
-        sessionStorage.setItem('aab_currentUser', JSON.stringify(newUser));
-        window.location.href = 'index.html';
-    });
-}
-
-// ======================
-// NEW FUNCTIONALITY ADDED BELOW
-// ======================
-
-// VIP Profit Processing (new)
-function processVIPProfit(user) {
-    if (!user.vipLevel || !user.vipApprovedDate) return user;
-
-    const now = new Date();
-    const vipStartDate = new Date(user.vipApprovedDate);
-    const daysCompleted = Math.floor((now - vipStartDate) / (1000 * 60 * 60 * 24));
-
-    // Complete VIP cycle after 60 days
-    if (daysCompleted >= 60) {
-        user.vipLevel = 0;
-        user.dailyProfit = 0;
-        alert('VIP cycle completed!');
-        return user;
-    }
-
-    // Add daily profit
-    const today = now.toISOString().split('T')[0];
-    const lastProfitDay = user.lastProfitDate ? 
-        new Date(user.lastProfitDate).toISOString().split('T')[0] : null;
-
-    if (!lastProfitDay || lastProfitDay !== today) {
-        const profit = VIP_DAILY_PROFITS[user.vipLevel - 1] || 0;
-        user.balance += profit;
-        user.totalEarnings += profit;
-        user.lastProfitDate = now.toISOString();
-        user.transactions.push({
-            type: `VIP ${user.vipLevel} daily profit`,
-            amount: profit,
-            date: now.toISOString(),
-            status: 'completed'
-        });
-    }
-
-    return user;
-}
-
-// Recharge Functionality (new)
-function setupRecharge() {
-    const rechargeForm = document.getElementById('recharge-form');
-    if (!rechargeForm) return;
-
-    rechargeForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-        const amount = parseInt(document.getElementById('recharge-amount').value);
-        const proof = "proof.jpg"; // In real app, handle file upload
-
-        if (amount < 10000) {
-            alert('Minimum recharge is UGX 10,000');
-            return;
-        }
-
-        const userIndex = usersDB.findIndex(u => u.id === currentUser.id);
-        if (userIndex !== -1) {
-            usersDB[userIndex].rechargeRequests.push({
-                amount,
-                date: new Date().toISOString(),
-                status: 'pending',
-                proof
-            });
-
-            usersDB[userIndex].transactions.push({
-                type: 'recharge',
-                amount,
-                date: new Date().toISOString(),
-                status: 'pending'
-            });
-
-            localStorage.setItem('aab_users', JSON.stringify(usersDB));
-            alert('Recharge request submitted!');
-            rechargeForm.reset();
-        }
-    });
-}
-
-// Withdrawal Functionality (new)
-function setupWithdrawal() {
-    const withdrawForm = document.getElementById('withdraw-form');
-    if (!withdrawForm) return;
-
-    withdrawForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-        const amount = parseInt(document.getElementById('withdraw-amount').value);
-        const phone = document.getElementById('withdraw-number').value;
-        const network = document.getElementById('withdraw-network').value;
-
-        if (amount < 5000 || amount > 2000000) {
-            alert('Amount must be between UGX 5,000 and 2,000,000');
-            return;
-        }
-
-        if (amount > currentUser.balance) {
-            alert('Insufficient balance');
-            return;
-        }
-
-        const userIndex = usersDB.findIndex(u => u.id === currentUser.id);
-        if (userIndex !== -1) {
-            usersDB[userIndex].withdrawalRequests.push({
-                amount,
-                phone,
-                network,
-                date: new Date().toISOString(),
-                status: 'pending'
-            });
-
-            usersDB[userIndex].transactions.push({
-                type: 'withdrawal',
-                amount: -amount,
-                date: new Date().toISOString(),
-                status: 'pending'
-            });
-
-            localStorage.setItem('aab_users', JSON.stringify(usersDB));
-            alert('Withdrawal request submitted!');
-            withdrawForm.reset();
-        }
-    });
-}
-
-// VIP Purchase (new)
-function setupVIPPurchase() {
-    const confirmBtn = document.getElementById('confirm-vip-btn');
-    if (!confirmBtn) return;
-
-    confirmBtn.addEventListener('click', function() {
-        const vipLevel = parseInt(document.getElementById('vip-modal-title').textContent.match(/\d+/)[0]);
-        const price = VIP_PRICES[vipLevel - 1];
-
-        const userIndex = usersDB.findIndex(u => u.id === currentUser.id);
-        if (userIndex !== -1 && usersDB[userIndex].balance >= price) {
-            usersDB[userIndex].vipRequests.push({
-                level: vipLevel,
-                amount: price,
-                date: new Date().toISOString(),
-                status: 'pending'
-            });
-
-            usersDB[userIndex].transactions.push({
-                type: `VIP ${vipLevel} purchase`,
-                amount: -price,
-                date: new Date().toISOString(),
-                status: 'pending'
-            });
-
-            localStorage.setItem('aab_users', JSON.stringify(usersDB));
-            alert('VIP purchase requested!');
-        } else {
-            alert('Insufficient balance');
-        }
-    });
-}
-
-// Admin Approvals (new)
-function setupAdminApprovals() {
-    // Approve recharge
-    document.querySelectorAll('.approve-recharge').forEach(btn => {
-        btn.addEventListener('click', function() {
-            const userId = this.dataset.userId;
-            const requestId = this.dataset.requestId;
-            
-            const userIndex = usersDB.findIndex(u => u.id === userId);
-            if (userIndex !== -1) {
-                const request = usersDB[userIndex].rechargeRequests.find(r => r.id === requestId);
-                if (request) {
-                    usersDB[userIndex].balance += request.amount;
-                    request.status = 'approved';
-                    localStorage.setItem('aab_users', JSON.stringify(usersDB));
-                    alert('Recharge approved!');
-                }
-            }
-        });
-    });
-
-    // Similar implementations for withdrawal and VIP approvals...
-}
-
-// Initialize Everything
-document.addEventListener('DOMContentLoaded', function() {
-    // Original logout setup
-    const logoutButtons = document.querySelectorAll('#logout-btn, #admin-logout-btn');
-    logoutButtons.forEach(btn => {
-        btn.addEventListener('click', function(e) {
-            e.preventDefault();
-            sessionStorage.removeItem('aab_currentUser');
-            sessionStorage.removeItem('aab_currentAdmin');
-            window.location.href = 'login.html';
-        });
-    });
-
-    // Process VIP profits on page load
-    if (currentUser && currentUser.vipLevel > 0) {
-        currentUser = processVIPProfit(currentUser);
-        sessionStorage.setItem('aab_currentUser', JSON.stringify(currentUser));
-    }
-
-    // Setup new functionality
-    setupRecharge();
-    setupWithdrawal();
-    setupVIPPurchase();
+  document.getElementById('login-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
     
-    if (currentAdmin) {
-        setupAdminApprovals();
+    const email = document.getElementById('login-email').value;
+    const password = document.getElementById('login-password').value;
+    const inviteCode = document.getElementById('login-invite').value || '2233';
+    const isAdmin = document.getElementById('login-admin').checked;
+    
+    try {
+      if (isAdmin) {
+        // Admin login
+        const response = await fetch(`${API_BASE_URL}/admin/login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ email, password })
+        });
+
+        if (!response.ok) {
+          throw new Error('Invalid admin credentials');
+        }
+
+        const data = await response.json();
+        storeToken(data.token);
+        window.location.href = 'admin.html';
+      } else {
+        // User login
+        const response = await fetch(`${API_BASE_URL}/users/login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ email, password, inviteCode })
+        });
+
+        if (!response.ok) {
+          throw new Error('Invalid email or password');
+        }
+
+        const data = await response.json();
+        storeToken(data.token);
+        currentUser = data.user;
+        window.location.href = 'index.html';
+      }
+    } catch (error) {
+      alert(error.message);
+      console.error('Login error:', error);
     }
+  });
+}
+
+// Signup Form
+if (document.getElementById('signup-form')) {
+  document.getElementById('signup-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const name = document.getElementById('signup-name').value;
+    const email = document.getElementById('signup-email').value;
+    const phone = document.getElementById('signup-phone').value;
+    const password = document.getElementById('signup-password').value;
+    const confirmPassword = document.getElementById('signup-confirm').value;
+    const inviteCode = document.getElementById('signup-invite').value || '2233';
+    
+    if (password !== confirmPassword) {
+      alert('Passwords do not match');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/users/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ name, email, phone, password, inviteCode })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Registration failed');
+      }
+
+      const data = await response.json();
+      storeToken(data.token);
+      currentUser = data.user;
+      window.location.href = 'index.html';
+    } catch (error) {
+      alert(error.message);
+      console.error('Registration error:', error);
+    }
+  });
+}
+
+// ======================
+// UPDATED FUNCTIONALITY
+// ======================
+
+// Initialize authentication on page load
+document.addEventListener('DOMContentLoaded', async function() {
+  // Check for existing token
+  const token = getToken();
+  if (token) {
+    const decoded = decodeToken(token);
+    if (decoded) {
+      currentUser = {
+        id: decoded.id,
+        name: decoded.name,
+        email: decoded.email,
+        balance: decoded.balance,
+        vipLevel: decoded.vipLevel
+      };
+      
+      // Load full user data if needed
+      if (window.location.pathname !== '/login.html') {
+        await loadCurrentUser();
+      }
+    }
+  }
+
+  // Logout functionality
+  const logoutButtons = document.querySelectorAll('#logout-btn, #admin-logout-btn');
+  logoutButtons.forEach(btn => {
+    btn.addEventListener('click', function(e) {
+      e.preventDefault();
+      clearAuth();
+      window.location.href = 'login.html';
+    });
+  });
+
+  // Process VIP profits on page load for authenticated users
+  if (currentUser && currentUser.vipLevel > 0) {
+    // This is now handled server-side during login
+    // We just need to display the updated user data
+    await loadCurrentUser();
+  }
+
+  // Setup other functionality
+  setupRecharge();
+  setupWithdrawal();
+  setupVIPPurchase();
 });
+
+// Recharge Functionality (updated)
+function setupRecharge() {
+  const rechargeForm = document.getElementById('recharge-form');
+  if (!rechargeForm) return;
+
+  rechargeForm.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const amount = parseInt(document.getElementById('recharge-amount').value);
+    const proof = "proof.jpg"; // In real app, handle file upload
+
+    if (amount < 10000) {
+      alert('Minimum recharge is UGX 10,000');
+      return;
+    }
+
+    try {
+      const response = await fetchWithAuth('/recharges', {
+        method: 'POST',
+        body: JSON.stringify({ amount, proof })
+      });
+
+      alert('Recharge request submitted!');
+      rechargeForm.reset();
+      
+      // Refresh user data
+      await loadCurrentUser();
+      updateUI();
+    } catch (error) {
+      alert(error.message);
+      console.error('Recharge error:', error);
+    }
+  });
+}
+
+// Withdrawal Functionality (updated)
+function setupWithdrawal() {
+  const withdrawForm = document.getElementById('withdraw-form');
+  if (!withdrawForm) return;
+
+  withdrawForm.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const amount = parseInt(document.getElementById('withdraw-amount').value);
+    const phone = document.getElementById('withdraw-number').value;
+    const network = document.getElementById('withdraw-network').value;
+
+    if (amount < 5000 || amount > 2000000) {
+      alert('Amount must be between UGX 5,000 and 2,000,000');
+      return;
+    }
+
+    try {
+      const response = await fetchWithAuth('/withdrawals', {
+        method: 'POST',
+        body: JSON.stringify({ amount, phone, network })
+      });
+
+      alert('Withdrawal request submitted!');
+      withdrawForm.reset();
+      
+      // Refresh user data
+      await loadCurrentUser();
+      updateUI();
+    } catch (error) {
+      alert(error.message);
+      console.error('Withdrawal error:', error);
+    }
+  });
+}
+
+// VIP Purchase (updated)
+function setupVIPPurchase() {
+  const confirmBtn = document.getElementById('confirm-vip-btn');
+  if (!confirmBtn) return;
+
+  confirmBtn.addEventListener('click', async function() {
+    const vipLevel = parseInt(document.getElementById('vip-modal-title').textContent.match(/\d+/)[0]);
+    const price = VIP_PRICES[vipLevel - 1];
+
+    try {
+      const response = await fetchWithAuth('/vip/purchase', {
+        method: 'POST',
+        body: JSON.stringify({ vipLevel })
+      });
+
+      alert('VIP purchase requested!');
+      
+      // Refresh user data
+      await loadCurrentUser();
+      updateUI();
+    } catch (error) {
+      alert(error.message);
+      console.error('VIP purchase error:', error);
+    }
+  });
+}
+
+// Update UI with current user data
+function updateUI() {
+  if (!currentUser) return;
+
+  // Update balance display
+  const balanceElements = document.querySelectorAll('.user-balance');
+  balanceElements.forEach(el => {
+    el.textContent = currentUser.balance;
+  });
+
+  // Update VIP status
+  if (currentUser.vipLevel > 0) {
+    const vipElements = document.querySelectorAll('.vip-status');
+    vipElements.forEach(el => {
+      el.textContent = `VIP ${currentUser.vipLevel}`;
+    });
+  }
+
+  // Update other user-specific UI elements as needed
+}
