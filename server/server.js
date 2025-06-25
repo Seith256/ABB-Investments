@@ -16,26 +16,34 @@ mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error('MongoDB connection error:', err));
 
-// User Schema
+// VIP Configuration (matches client-side)
+const VIP_DAILY_PROFITS = [1800, 6000, 10000, 13000, 28000, 60000, 75000, 150000, 400000, 600000];
+const VIP_PRICES = [10000, 30000, 50000, 80000, 120000, 240000, 300000, 600000, 1200000, 2000000];
+
+// User Schema (matches client-side structure)
 const userSchema = new mongoose.Schema({
-  username: { type: String, required: true },
+  name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   phone: String,
   balance: { type: Number, default: 2000 },
-  isVIP: { type: Boolean, default: false },
-  vipLevel: { type: Number, default: 0 },
-  vipApprovedDate: Date,
-  lastProfitDate: Date,
-  invitationCode: String,
+  invitationCode: { type: String, default: () => Math.floor(1000 + Math.random() * 9000).toString() },
   invitedBy: String,
   hasUsedInvite: { type: Boolean, default: false },
+  vipLevel: { type: Number, default: 0 },
+  dailyProfit: { type: Number, default: 0 },
+  totalEarnings: { type: Number, default: 0 },
   referralEarnings: { type: Number, default: 0 },
+  referrals: [{
+    email: String,
+    date: { type: Date, default: Date.now },
+    bonus: Number
+  }],
   transactions: [{
     type: String,
     amount: Number,
     date: { type: Date, default: Date.now },
-    status: { type: String, default: 'pending' }
+    status: { type: String, default: 'completed' }
   }],
   rechargeRequests: [{
     amount: Number,
@@ -56,11 +64,10 @@ const userSchema = new mongoose.Schema({
     date: { type: Date, default: Date.now },
     status: { type: String, default: 'pending' }
   }],
-  referrals: [{
-    email: String,
-    date: { type: Date, default: Date.now },
-    bonus: Number
-  }]
+  vipApprovedDate: Date,
+  lastProfitDate: Date,
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 
 // Admin Schema
@@ -74,21 +81,16 @@ const adminSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 const Admin = mongoose.model('Admin', adminSchema);
 
-// VIP Configuration
-const VIP_LEVELS = [
-  { price: 10000, dailyProfit: 1800 },
-  { price: 30000, dailyProfit: 6000 },
-  // ... add all 10 VIP levels
-  { price: 2000000, dailyProfit: 600000 }
-];
-
 // Helper Functions
 const generateToken = (user, isAdmin = false) => {
   return jwt.sign(
     { 
       id: user._id, 
       email: user.email, 
-      isAdmin 
+      isAdmin,
+      name: user.name,
+      balance: user.balance,
+      vipLevel: user.vipLevel
     },
     process.env.JWT_SECRET,
     { expiresIn: '8h' }
@@ -111,7 +113,7 @@ const initAdmin = async () => {
 
 // Routes
 
-// Admin Login
+// Admin Login (matches client-side)
 app.post('/api/admin/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -136,26 +138,23 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
-// User Registration
+// User Registration (matches client-side)
 app.post('/api/users/register', async (req, res) => {
   try {
-    const { username, email, password, phone, inviteCode } = req.body;
+    const { name, email, phone, password, inviteCode = '2233' } = req.body;
     
-    // Check if user exists
     if (await User.findOne({ email })) {
       return res.status(400).json({ message: 'Email already registered' });
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user
     const newUser = new User({
-      username,
+      name,
       email,
       phone,
       password: hashedPassword,
-      invitationCode: Math.random().toString(36).substring(2, 10).toUpperCase(),
+      balance: 2000,
       transactions: [{
         type: 'bonus',
         amount: 2000,
@@ -169,6 +168,7 @@ app.post('/api/users/register', async (req, res) => {
       if (inviter) {
         newUser.invitedBy = inviter.email;
         newUser.hasUsedInvite = true;
+        
         inviter.referrals.push({
           email: newUser.email,
           bonus: 0
@@ -182,7 +182,13 @@ app.post('/api/users/register', async (req, res) => {
     const token = generateToken(newUser);
     res.status(201).json({
       message: 'User registered successfully',
-      user: newUser,
+      user: {
+        id: newUser._id,
+        name: newUser.name,
+        email: newUser.email,
+        balance: newUser.balance,
+        vipLevel: newUser.vipLevel
+      },
       token
     });
   } catch (error) {
@@ -191,14 +197,14 @@ app.post('/api/users/register', async (req, res) => {
   }
 });
 
-// User Login
+// User Login (matches client-side)
 app.post('/api/users/login', async (req, res) => {
   try {
-    const { email, password, inviteCode } = req.body;
+    const { email, password, inviteCode = '2233' } = req.body;
     const user = await User.findOne({ email });
     
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ message: 'Invalid email or password' });
     }
 
     // Process invitation code
@@ -209,7 +215,8 @@ app.post('/api/users/login', async (req, res) => {
         inviter.referralEarnings += 2000;
         inviter.referrals.push({
           email: user.email,
-          bonus: 2000
+          bonus: 2000,
+          date: new Date()
         });
         await inviter.save();
         
@@ -220,32 +227,48 @@ app.post('/api/users/login', async (req, res) => {
     }
 
     // Process VIP daily profit
-    if (user.isVIP && user.vipApprovedDate) {
+    if (user.vipLevel > 0 && user.vipApprovedDate) {
       const now = new Date();
-      const lastProfitDate = user.lastProfitDate || user.vipApprovedDate;
-      const today = now.toISOString().split('T')[0];
-      const lastProfitDay = new Date(lastProfitDate).toISOString().split('T')[0];
-      
-      if (today !== lastProfitDay) {
-        const vipLevel = user.vipLevel - 1;
-        const profit = VIP_LEVELS[vipLevel]?.dailyProfit || 0;
-        
-        user.balance += profit;
-        user.lastProfitDate = now;
-        user.transactions.push({
-          type: `VIP ${user.vipLevel} daily profit`,
-          amount: profit,
-          status: 'completed'
-        });
-        
+      const vipStartDate = new Date(user.vipApprovedDate);
+      const daysCompleted = Math.floor((now - vipStartDate) / (1000 * 60 * 60 * 24));
+
+      // Complete VIP cycle after 60 days
+      if (daysCompleted >= 60) {
+        user.vipLevel = 0;
+        user.dailyProfit = 0;
         await user.save();
+      } else {
+        // Add daily profit if not already added today
+        const today = now.toISOString().split('T')[0];
+        const lastProfitDay = user.lastProfitDate ? 
+          new Date(user.lastProfitDate).toISOString().split('T')[0] : null;
+
+        if (!lastProfitDay || lastProfitDay !== today) {
+          const profit = VIP_DAILY_PROFITS[user.vipLevel - 1] || 0;
+          user.balance += profit;
+          user.totalEarnings += profit;
+          user.lastProfitDate = now;
+          user.transactions.push({
+            type: `VIP ${user.vipLevel} daily profit`,
+            amount: profit,
+            status: 'completed'
+          });
+          await user.save();
+        }
       }
     }
 
     const token = generateToken(user);
     res.json({
       message: 'Login successful',
-      user,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        balance: user.balance,
+        vipLevel: user.vipLevel,
+        dailyProfit: user.dailyProfit
+      },
       token
     });
   } catch (error) {
@@ -270,12 +293,44 @@ const verifyToken = (req, res, next) => {
 
 // Protected Routes
 
-// Recharge Request
+// Get User Data
+app.get('/api/users/me', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    
+    res.json({
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        balance: user.balance,
+        vipLevel: user.vipLevel,
+        dailyProfit: user.dailyProfit,
+        totalEarnings: user.totalEarnings,
+        referralEarnings: user.referralEarnings,
+        invitationCode: user.invitationCode,
+        invitedBy: user.invitedBy,
+        transactions: user.transactions,
+        referrals: user.referrals
+      }
+    });
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(500).json({ message: 'Failed to get user data' });
+  }
+});
+
+// Recharge Request (matches client-side)
 app.post('/api/recharges', verifyToken, async (req, res) => {
   try {
-    const { amount, proof } = req.body;
+    const { amount, proof = "proof.jpg" } = req.body;
+    if (amount < 10000) {
+      return res.status(400).json({ message: 'Minimum recharge is UGX 10,000' });
+    }
+
     const user = await User.findById(req.user.id);
-    
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     user.rechargeRequests.push({
@@ -291,75 +346,32 @@ app.post('/api/recharges', verifyToken, async (req, res) => {
     });
 
     await user.save();
-    res.json({ message: 'Recharge request submitted', user });
+    res.json({ 
+      message: 'Recharge request submitted!',
+      user: {
+        balance: user.balance,
+        transactions: user.transactions
+      }
+    });
   } catch (error) {
     console.error('Recharge error:', error);
     res.status(500).json({ message: 'Recharge failed' });
   }
 });
 
-// Approve Recharge (Admin)
-app.post('/api/recharges/approve', verifyToken, async (req, res) => {
-  try {
-    if (!req.user.isAdmin) return res.status(403).json({ message: 'Admin access required' });
-
-    const { userId, requestId } = req.body;
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    const request = user.rechargeRequests.id(requestId);
-    if (!request || request.status !== 'pending') {
-      return res.status(400).json({ message: 'Invalid request' });
-    }
-
-    // Update balance and status
-    user.balance += request.amount;
-    request.status = 'approved';
-    
-    // Update transaction
-    const transaction = user.transactions.find(
-      t => t.amount === request.amount && t.type === 'recharge' && t.status === 'pending'
-    );
-    if (transaction) transaction.status = 'completed';
-
-    // Process referral bonus
-    if (user.invitedBy) {
-      const inviter = await User.findOne({ email: user.invitedBy });
-      if (inviter) {
-        const bonus = Math.floor(request.amount * 0.15);
-        inviter.balance += bonus;
-        inviter.referralEarnings += bonus;
-        
-        const referral = inviter.referrals.find(r => r.email === user.email);
-        if (referral) {
-          referral.bonus += bonus;
-        } else {
-          inviter.referrals.push({
-            email: user.email,
-            bonus
-          });
-        }
-        
-        await inviter.save();
-      }
-    }
-
-    await user.save();
-    res.json({ message: 'Recharge approved', user });
-  } catch (error) {
-    console.error('Approval error:', error);
-    res.status(500).json({ message: 'Approval failed' });
-  }
-});
-
-// Withdrawal Request
+// Withdrawal Request (matches client-side)
 app.post('/api/withdrawals', verifyToken, async (req, res) => {
   try {
     const { amount, phone, network } = req.body;
+    if (amount < 5000 || amount > 2000000) {
+      return res.status(400).json({ message: 'Amount must be between UGX 5,000 and 2,000,000' });
+    }
+
     const user = await User.findById(req.user.id);
-    
     if (!user) return res.status(404).json({ message: 'User not found' });
-    if (user.balance < amount) return res.status(400).json({ message: 'Insufficient balance' });
+    if (user.balance < amount) {
+      return res.status(400).json({ message: 'Insufficient balance' });
+    }
 
     user.withdrawalRequests.push({
       amount,
@@ -375,48 +387,121 @@ app.post('/api/withdrawals', verifyToken, async (req, res) => {
     });
 
     await user.save();
-    res.json({ message: 'Withdrawal request submitted', user });
+    res.json({ 
+      message: 'Withdrawal request submitted!',
+      user: {
+        balance: user.balance,
+        transactions: user.transactions
+      }
+    });
   } catch (error) {
     console.error('Withdrawal error:', error);
     res.status(500).json({ message: 'Withdrawal failed' });
   }
 });
 
-// VIP Purchase
+// VIP Purchase (matches client-side)
 app.post('/api/vip/purchase', verifyToken, async (req, res) => {
   try {
     const { vipLevel } = req.body;
     const user = await User.findById(req.user.id);
-    const vipInfo = VIP_LEVELS[vipLevel - 1];
-    
     if (!user) return res.status(404).json({ message: 'User not found' });
-    if (!vipInfo) return res.status(400).json({ message: 'Invalid VIP level' });
-    if (user.balance < vipInfo.price) {
+
+    const price = VIP_PRICES[vipLevel - 1];
+    if (!price) return res.status(400).json({ message: 'Invalid VIP level' });
+    if (user.balance < price) {
       return res.status(400).json({ message: 'Insufficient balance' });
     }
 
     user.vipRequests.push({
       level: vipLevel,
-      amount: vipInfo.price,
+      amount: price,
       status: 'pending'
     });
 
     user.transactions.push({
       type: `VIP ${vipLevel} purchase`,
-      amount: -vipInfo.price,
+      amount: -price,
       status: 'pending'
     });
 
     await user.save();
-    res.json({ message: 'VIP purchase requested', user });
+    res.json({ 
+      message: 'VIP purchase requested!',
+      user: {
+        balance: user.balance,
+        transactions: user.transactions
+      }
+    });
   } catch (error) {
     console.error('VIP purchase error:', error);
     res.status(500).json({ message: 'VIP purchase failed' });
   }
 });
 
+// Admin Routes
+
+// Approve Recharge (Admin)
+app.post('/api/admin/recharges/approve', verifyToken, async (req, res) => {
+  try {
+    if (!req.user.isAdmin) return res.status(403).json({ message: 'Admin access required' });
+
+    const { userId, requestId } = req.body;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const request = user.rechargeRequests.id(requestId);
+    if (!request || request.status !== 'pending') {
+      return res.status(400).json({ message: 'Invalid request' });
+    }
+
+    user.balance += request.amount;
+    request.status = 'approved';
+    
+    const transaction = user.transactions.find(
+      t => t.amount === request.amount && t.type === 'recharge' && t.status === 'pending'
+    );
+    if (transaction) transaction.status = 'completed';
+
+    await user.save();
+    res.json({ message: 'Recharge approved', user });
+  } catch (error) {
+    console.error('Approval error:', error);
+    res.status(500).json({ message: 'Approval failed' });
+  }
+});
+
+// Approve Withdrawal (Admin)
+app.post('/api/admin/withdrawals/approve', verifyToken, async (req, res) => {
+  try {
+    if (!req.user.isAdmin) return res.status(403).json({ message: 'Admin access required' });
+
+    const { userId, requestId } = req.body;
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const request = user.withdrawalRequests.id(requestId);
+    if (!request || request.status !== 'pending') {
+      return res.status(400).json({ message: 'Invalid request' });
+    }
+
+    request.status = 'approved';
+    
+    const transaction = user.transactions.find(
+      t => t.amount === -request.amount && t.type === 'withdrawal' && t.status === 'pending'
+    );
+    if (transaction) transaction.status = 'completed';
+
+    await user.save();
+    res.json({ message: 'Withdrawal approved', user });
+  } catch (error) {
+    console.error('Approval error:', error);
+    res.status(500).json({ message: 'Approval failed' });
+  }
+});
+
 // Approve VIP (Admin)
-app.post('/api/vip/approve', verifyToken, async (req, res) => {
+app.post('/api/admin/vip/approve', verifyToken, async (req, res) => {
   try {
     if (!req.user.isAdmin) return res.status(403).json({ message: 'Admin access required' });
 
@@ -429,18 +514,14 @@ app.post('/api/vip/approve', verifyToken, async (req, res) => {
       return res.status(400).json({ message: 'Invalid request' });
     }
 
-    const vipInfo = VIP_LEVELS[request.level - 1];
-    if (!vipInfo) return res.status(400).json({ message: 'Invalid VIP level' });
+    const dailyProfit = VIP_DAILY_PROFITS[request.level - 1];
+    if (!dailyProfit) return res.status(400).json({ message: 'Invalid VIP level' });
 
-    // Update user VIP status
-    user.balance -= request.amount;
-    user.isVIP = true;
     user.vipLevel = request.level;
+    user.dailyProfit = dailyProfit;
     user.vipApprovedDate = new Date();
-    user.dailyProfit = vipInfo.dailyProfit;
     request.status = 'approved';
     
-    // Update transaction
     const transaction = user.transactions.find(
       t => t.amount === -request.amount && t.type.includes('VIP') && t.status === 'pending'
     );
@@ -451,6 +532,19 @@ app.post('/api/vip/approve', verifyToken, async (req, res) => {
   } catch (error) {
     console.error('VIP approval error:', error);
     res.status(500).json({ message: 'VIP approval failed' });
+  }
+});
+
+// Get All Users (Admin)
+app.get('/api/admin/users', verifyToken, async (req, res) => {
+  try {
+    if (!req.user.isAdmin) return res.status(403).json({ message: 'Admin access required' });
+
+    const users = await User.find({}, { password: 0 });
+    res.json(users);
+  } catch (error) {
+    console.error('Get users error:', error);
+    res.status(500).json({ message: 'Failed to get users' });
   }
 });
 
