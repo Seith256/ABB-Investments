@@ -1,32 +1,3 @@
-const API_BASE = 'https://abb-backend.onrender.com';
-const JWT_KEY  = 'aab_token';
-const USER_KEY = 'aab_currentUser';
-const DEFAULT_INVITE_CODE = '2233';
-
-// Helper to store session
-function setSession(token, user) {
-  sessionStorage.setItem(JWT_KEY, token);
-  sessionStorage.setItem(USER_KEY, JSON.stringify(user));
-  localStorage.setItem(JWT_KEY, token);  // Store token in localStorage
-  localStorage.setItem(USER_KEY, JSON.stringify(user));  // Store user data in localStorage
-}
-
-// Helper to send user data to the admin panel (or a monitoring system)
-async function sendUserDataToAdminPanel(user) {
-  try {
-    const res = await fetch(API_BASE + '/api/admin/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(user),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message);
-    console.log('User data sent to admin panel');
-  } catch (err) {
-    console.error('Error sending user data to admin panel:', err.message);
-  }
-}
-
 // Current user session
 let currentUser = JSON.parse(sessionStorage.getItem('aab_currentUser'));
 let currentAdmin = JSON.parse(sessionStorage.getItem('aab_currentAdmin'));
