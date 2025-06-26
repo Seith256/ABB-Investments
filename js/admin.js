@@ -1,5 +1,5 @@
 // admin.js
-import { authFetch } from './auth.js';
+import { authFetch } from '.js/auth.js';
 
 document.addEventListener('DOMContentLoaded', async function () {
     const token = sessionStorage.getItem('aab_admin_token');
