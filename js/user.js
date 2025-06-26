@@ -434,7 +434,7 @@ document.addEventListener('click', function(e) {
   }
 });
 
-// Add this new function to handle VIP profit processing
+//VIP profit processing
 function processVIPProfit(user) {
     if (user.vipLevel > 0 && user.vipApprovedDate) {
         const now = new Date();
@@ -506,7 +506,7 @@ function processVIPProfit(user) {
     }
 }
 
-// Update your VIP purchase confirmation to include initialization of tracking properties
+// Update of VIP purchase confirmation to include initialization of tracking properties
 document.getElementById('confirm-vip-btn').addEventListener('click', function() {
     const modalTitle = document.getElementById('vip-modal-title').textContent;
     const vipLevel = parseInt(modalTitle.replace('Upgrade to VIP ', ''));
